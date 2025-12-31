@@ -69,11 +69,16 @@ This pak is designed and tested only for the NextUI and TrimUI Brick @ Trimui Br
 - Navigate to your music folder using the `Local File` menu
 - Select a file to start playback
 
+![IMG_32041](https://github.com/user-attachments/assets/23e9fbbd-4e97-4463-86ab-710d794c4588)
+
 ### Internet Radio
 - Navigate to the stations list using the `Internet Radio` menu
 - Select from predefined list of station in the `Manage Stations` menu
 - Or add custom stations at `.userdata/shared/radio_stations.txt`
 - Metadata displays automatically when available
+
+![IMG_32061](https://github.com/user-attachments/assets/4b31972b-1408-43be-bdc7-400f43a2e1cf)
+
 
 ### MP3 Downloads
 - Navigate to the music search page using the `MP3 Downloader` menu
