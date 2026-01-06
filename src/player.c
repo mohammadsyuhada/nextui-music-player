@@ -283,6 +283,54 @@ static void generate_waveform(void) {
     waveform.valid = true;
 }
 
+// ============ RESAMPLING ============
+
+// Linear interpolation resampler for converting sample rates
+// Returns newly allocated buffer on success, NULL on failure
+// Caller must free the returned buffer (different from input)
+// Input must be stereo interleaved 16-bit samples
+static int16_t* resample_linear(int16_t* input, size_t input_frames,
+                                 int src_rate, int dst_rate, size_t* output_frames) {
+    if (src_rate == dst_rate) {
+        *output_frames = input_frames;
+        return NULL;  // No resampling needed, caller should use original
+    }
+
+    double ratio = (double)dst_rate / (double)src_rate;
+    *output_frames = (size_t)(input_frames * ratio);
+
+    if (*output_frames == 0) {
+        LOG_error("Resample: output_frames is 0, input_frames=%zu, ratio=%.4f\n",
+                  input_frames, ratio);
+        return NULL;
+    }
+
+    int16_t* output = malloc(*output_frames * sizeof(int16_t) * AUDIO_CHANNELS);
+    if (!output) {
+        LOG_error("Resample: malloc failed for %zu frames (%zu bytes)\n",
+                  *output_frames, *output_frames * sizeof(int16_t) * AUDIO_CHANNELS);
+        return NULL;
+    }
+
+    for (size_t i = 0; i < *output_frames; i++) {
+        double src_pos = (double)i / ratio;
+        size_t idx0 = (size_t)src_pos;
+        size_t idx1 = idx0 + 1;
+        if (idx1 >= input_frames) idx1 = input_frames - 1;
+
+        double frac = src_pos - idx0;
+
+        // Interpolate left and right channels
+        for (int ch = 0; ch < AUDIO_CHANNELS; ch++) {
+            double s0 = input[idx0 * AUDIO_CHANNELS + ch];
+            double s1 = input[idx1 * AUDIO_CHANNELS + ch];
+            output[i * AUDIO_CHANNELS + ch] = (int16_t)(s0 + frac * (s1 - s0));
+        }
+    }
+
+    return output;
+}
+
 // ============ METADATA PARSING ============
 
 // Helper: read syncsafe integer (ID3v2)
@@ -646,9 +694,27 @@ static int load_mp3(const char* filepath) {
         buffer_size = frames_read * sizeof(int16_t) * 2;
     }
 
+    // Resample to target rate if needed
+    int effective_sample_rate = source_sample_rate;
+    if (source_sample_rate != SAMPLE_RATE) {
+        size_t resampled_frames;
+        int16_t* resampled = resample_linear(buffer, frames_read, source_sample_rate, SAMPLE_RATE, &resampled_frames);
+        if (resampled) {
+            free(buffer);
+            buffer = resampled;
+            buffer_size = resampled_frames * sizeof(int16_t) * AUDIO_CHANNELS;
+            effective_sample_rate = SAMPLE_RATE;
+        } else {
+            // Resampling failed - will need to use native sample rate
+            LOG_error("MP3: Resampling failed, using native rate %d Hz\n", source_sample_rate);
+        }
+    }
+
     player.audio_data = buffer;
     player.audio_size = buffer_size;
     player.format = AUDIO_FORMAT_MP3;
+    // Update sample_rate to reflect the actual rate of the buffer (for device config)
+    player.track_info.sample_rate = effective_sample_rate;
 
     // Parse MP3 metadata (ID3 tags)
     parse_mp3_metadata(filepath);
@@ -695,9 +761,25 @@ static int load_wav(const char* filepath) {
         buffer_size = frames_read * sizeof(int16_t) * 2;
     }
 
+    // Resample to target rate if needed
+    int effective_sample_rate = source_sample_rate;
+    if (source_sample_rate != SAMPLE_RATE) {
+        size_t resampled_frames;
+        int16_t* resampled = resample_linear(buffer, frames_read, source_sample_rate, SAMPLE_RATE, &resampled_frames);
+        if (resampled) {
+            free(buffer);
+            buffer = resampled;
+            buffer_size = resampled_frames * sizeof(int16_t) * AUDIO_CHANNELS;
+            effective_sample_rate = SAMPLE_RATE;
+        } else {
+            LOG_error("WAV: Resampling failed, using native rate %d Hz\n", source_sample_rate);
+        }
+    }
+
     player.audio_data = buffer;
     player.audio_size = buffer_size;
     player.format = AUDIO_FORMAT_WAV;
+    player.track_info.sample_rate = effective_sample_rate;
 
     return 0;
 }
@@ -740,9 +822,25 @@ static int load_flac(const char* filepath) {
         buffer_size = frames_read * sizeof(int16_t) * 2;
     }
 
+    // Resample to target rate if needed
+    int effective_sample_rate = sample_rate;
+    if (sample_rate != SAMPLE_RATE) {
+        size_t resampled_frames;
+        int16_t* resampled = resample_linear(buffer, frames_read, sample_rate, SAMPLE_RATE, &resampled_frames);
+        if (resampled) {
+            free(buffer);
+            buffer = resampled;
+            buffer_size = resampled_frames * sizeof(int16_t) * AUDIO_CHANNELS;
+            effective_sample_rate = SAMPLE_RATE;
+        } else {
+            LOG_error("FLAC: Resampling failed, using native rate %d Hz\n", sample_rate);
+        }
+    }
+
     player.audio_data = buffer;
     player.audio_size = buffer_size;
     player.format = AUDIO_FORMAT_FLAC;
+    player.track_info.sample_rate = effective_sample_rate;
 
     return 0;
 }
@@ -777,13 +875,32 @@ static int load_ogg(const char* filepath) {
         return -1;
     }
 
+    // Save source sample rate before closing
+    int source_sample_rate = info.sample_rate;
+
     // Decode to 16-bit interleaved PCM
     int samples_read = stb_vorbis_get_samples_short_interleaved(vorbis, AUDIO_CHANNELS, buffer, total_samples * AUDIO_CHANNELS);
     stb_vorbis_close(vorbis);
 
+    // Resample to target rate if needed
+    int effective_sample_rate = source_sample_rate;
+    if (source_sample_rate != SAMPLE_RATE) {
+        size_t resampled_frames;
+        int16_t* resampled = resample_linear(buffer, samples_read, source_sample_rate, SAMPLE_RATE, &resampled_frames);
+        if (resampled) {
+            free(buffer);
+            buffer = resampled;
+            samples_read = resampled_frames;
+            effective_sample_rate = SAMPLE_RATE;
+        } else {
+            LOG_error("OGG: Resampling failed, using native rate %d Hz\n", source_sample_rate);
+        }
+    }
+
     player.audio_data = buffer;
     player.audio_size = samples_read * sizeof(int16_t) * AUDIO_CHANNELS;
     player.format = AUDIO_FORMAT_OGG;
+    player.track_info.sample_rate = effective_sample_rate;
 
     return 0;
 }
@@ -820,6 +937,7 @@ static int decode_audio_file(const char* filepath, void** out_data, size_t* out_
             info.duration_ms = (int)((total_frames * 1000) / mp3.sampleRate);
 
             int source_channels = mp3.channels;
+            int source_sample_rate = mp3.sampleRate;
             size_t buffer_size = total_frames * sizeof(int16_t) * AUDIO_CHANNELS;
             int16_t* buffer = malloc(buffer_size);
             if (!buffer) { drmp3_uninit(&mp3); return -1; }
@@ -837,6 +955,21 @@ static int decode_audio_file(const char* filepath, void** out_data, size_t* out_
                 buffer = stereo;
                 buffer_size = frames_read * sizeof(int16_t) * 2;
             }
+
+            // Resample to target rate if needed
+            int effective_rate = source_sample_rate;
+            if (source_sample_rate != SAMPLE_RATE) {
+                size_t resampled_frames;
+                int16_t* resampled = resample_linear(buffer, frames_read, source_sample_rate, SAMPLE_RATE, &resampled_frames);
+                if (resampled) {
+                    free(buffer);
+                    buffer = resampled;
+                    buffer_size = resampled_frames * sizeof(int16_t) * AUDIO_CHANNELS;
+                    effective_rate = SAMPLE_RATE;
+                }
+            }
+            info.sample_rate = effective_rate;
+
             audio_data = buffer;
             audio_size = buffer_size;
             break;
@@ -850,6 +983,7 @@ static int decode_audio_file(const char* filepath, void** out_data, size_t* out_
             info.duration_ms = (int)((wav.totalPCMFrameCount * 1000) / wav.sampleRate);
 
             int source_channels = wav.channels;
+            int source_sample_rate = wav.sampleRate;
             size_t buffer_size = wav.totalPCMFrameCount * sizeof(int16_t) * AUDIO_CHANNELS;
             int16_t* buffer = malloc(buffer_size);
             if (!buffer) { drwav_uninit(&wav); return -1; }
@@ -867,6 +1001,21 @@ static int decode_audio_file(const char* filepath, void** out_data, size_t* out_
                 buffer = stereo;
                 buffer_size = frames_read * sizeof(int16_t) * 2;
             }
+
+            // Resample to target rate if needed
+            int effective_rate = source_sample_rate;
+            if (source_sample_rate != SAMPLE_RATE) {
+                size_t resampled_frames;
+                int16_t* resampled = resample_linear(buffer, frames_read, source_sample_rate, SAMPLE_RATE, &resampled_frames);
+                if (resampled) {
+                    free(buffer);
+                    buffer = resampled;
+                    buffer_size = resampled_frames * sizeof(int16_t) * AUDIO_CHANNELS;
+                    effective_rate = SAMPLE_RATE;
+                }
+            }
+            info.sample_rate = effective_rate;
+
             audio_data = buffer;
             audio_size = buffer_size;
             break;
@@ -880,6 +1029,7 @@ static int decode_audio_file(const char* filepath, void** out_data, size_t* out_
             info.duration_ms = (int)((flac->totalPCMFrameCount * 1000) / flac->sampleRate);
 
             int source_channels = flac->channels;
+            int source_sample_rate = flac->sampleRate;
             size_t buffer_size = flac->totalPCMFrameCount * sizeof(int16_t) * AUDIO_CHANNELS;
             int16_t* buffer = malloc(buffer_size);
             if (!buffer) { drflac_close(flac); return -1; }
@@ -897,6 +1047,21 @@ static int decode_audio_file(const char* filepath, void** out_data, size_t* out_
                 buffer = stereo;
                 buffer_size = frames_read * sizeof(int16_t) * 2;
             }
+
+            // Resample to target rate if needed
+            int effective_rate = source_sample_rate;
+            if (source_sample_rate != SAMPLE_RATE) {
+                size_t resampled_frames;
+                int16_t* resampled = resample_linear(buffer, frames_read, source_sample_rate, SAMPLE_RATE, &resampled_frames);
+                if (resampled) {
+                    free(buffer);
+                    buffer = resampled;
+                    buffer_size = resampled_frames * sizeof(int16_t) * AUDIO_CHANNELS;
+                    effective_rate = SAMPLE_RATE;
+                }
+            }
+            info.sample_rate = effective_rate;
+
             audio_data = buffer;
             audio_size = buffer_size;
             break;
@@ -913,12 +1078,27 @@ static int decode_audio_file(const char* filepath, void** out_data, size_t* out_
             info.channels = vinfo.channels;
             info.duration_ms = (int)((total_samples * 1000) / vinfo.sample_rate);
 
+            int source_sample_rate = vinfo.sample_rate;
             size_t buffer_size = total_samples * sizeof(int16_t) * AUDIO_CHANNELS;
             int16_t* buffer = malloc(buffer_size);
             if (!buffer) { stb_vorbis_close(vorbis); return -1; }
 
             int samples_read = stb_vorbis_get_samples_short_interleaved(vorbis, AUDIO_CHANNELS, buffer, total_samples * AUDIO_CHANNELS);
             stb_vorbis_close(vorbis);
+
+            // Resample to target rate if needed
+            int effective_rate = source_sample_rate;
+            if (source_sample_rate != SAMPLE_RATE) {
+                size_t resampled_frames;
+                int16_t* resampled = resample_linear(buffer, samples_read, source_sample_rate, SAMPLE_RATE, &resampled_frames);
+                if (resampled) {
+                    free(buffer);
+                    buffer = resampled;
+                    samples_read = resampled_frames;
+                    effective_rate = SAMPLE_RATE;
+                }
+            }
+            info.sample_rate = effective_rate;
 
             audio_data = buffer;
             audio_size = samples_read * sizeof(int16_t) * AUDIO_CHANNELS;
@@ -1001,6 +1181,18 @@ void Player_preload(const char* filepath) {
 
     // Start background thread
     pthread_create(&preload.thread, NULL, preload_thread_func, NULL);
+}
+
+// Reset audio device to default sample rate (for radio use)
+void Player_resetSampleRate(void) {
+    reconfigure_audio_device(SAMPLE_RATE);
+}
+
+// Set audio device to specific sample rate
+void Player_setSampleRate(int sample_rate) {
+    if (sample_rate > 0) {
+        reconfigure_audio_device(sample_rate);
+    }
 }
 
 // Check if preload is ready for a specific file
@@ -1099,7 +1291,8 @@ int Player_load(const char* filepath) {
     }
 
     if (result == 0) {
-        // Reconfigure audio device to match file's sample rate
+        // Configure audio device to match the buffer's sample rate
+        // (should be 48kHz if resampling succeeded, or native rate if it failed)
         reconfigure_audio_device(player.track_info.sample_rate);
 
         pthread_mutex_lock(&player.mutex);

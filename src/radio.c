@@ -1625,7 +1625,6 @@ static void* hls_stream_thread_func(void* arg) {
                         // Reconfigure audio device to match stream's sample rate
                         Player_setSampleRate(frame_info.sampRateOut);
                         Player_resumeAudio();  // Resume after reconfiguration
-                        LOG_info("HLS AAC stream sample rate: %d Hz\n", frame_info.sampRateOut);
                     }
 
                     // Update position based on consumed bytes
@@ -1850,7 +1849,6 @@ static void* stream_thread_func(void* arg) {
                         // Reconfigure audio device to match stream's sample rate
                         Player_setSampleRate(frame_info.sampRateOut);
                         Player_resumeAudio();  // Resume after reconfiguration
-                        LOG_info("AAC Radio stream sample rate: %d Hz\n", frame_info.sampRateOut);
                     }
 
                     // Consume the decoded data
@@ -1929,7 +1927,6 @@ static void* stream_thread_func(void* arg) {
                         // Reconfigure audio device to match stream's sample rate
                         Player_setSampleRate(frame_info.sample_rate);
                         Player_resumeAudio();  // Resume after reconfiguration
-                        LOG_info("Radio stream sample rate: %d Hz\n", frame_info.sample_rate);
                     }
 
                     // Consume the frame

@@ -142,4 +142,10 @@ void Player_update(void);
 void Player_resumeAudio(void);
 void Player_pauseAudio(void);
 
+// Reset audio device to default 48000 Hz sample rate (for radio use)
+void Player_resetSampleRate(void);
+
+// Set audio device to specific sample rate
+void Player_setSampleRate(int sample_rate);
+
 #endif
