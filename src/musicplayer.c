@@ -539,6 +539,19 @@ static int get_current_track_number(void) {
     return num;
 }
 
+// Preload the next track in the background
+static void preload_next_track(void) {
+    // Find the next audio file after current selection
+    for (int i = browser.selected + 1; i < browser.entry_count; i++) {
+        if (!browser.entries[i].is_dir) {
+            Player_preload(browser.entries[i].path);
+            return;
+        }
+    }
+    // If no next track, could optionally preload first track for looping
+    // For now, just don't preload anything
+}
+
 // Render the now playing screen
 static void render_playing(void) {
     GFX_clear(screen);
@@ -2106,6 +2119,7 @@ int main(int argc, char* argv[]) {
                     // Load and play the file
                     if (Player_load(entry->path) == 0) {
                         Player_play();
+                        preload_next_track();  // Preload next track in background
                         app_state = STATE_PLAYING;
                         last_input_time = SDL_GetTicks();  // Start screen-off timer
                         dirty = 1;
@@ -2195,6 +2209,7 @@ int main(int argc, char* argv[]) {
                                 browser.selected = i;
                                 if (Player_load(browser.entries[i].path) == 0) {
                                     Player_play();
+                                    preload_next_track();  // Preload next track
                                     found_next = true;
                                 }
                                 break;
@@ -2270,6 +2285,7 @@ int main(int argc, char* argv[]) {
                             browser.selected = i;
                             if (Player_load(browser.entries[i].path) == 0) {
                                 Player_play();
+                                preload_next_track();  // Preload next track
                             }
                             dirty = 1;
                             break;
@@ -2339,6 +2355,7 @@ int main(int argc, char* argv[]) {
                                     browser.selected = i;
                                     if (Player_load(browser.entries[i].path) == 0) {
                                         Player_play();
+                                        preload_next_track();  // Preload next track
                                         found_next = true;
                                     }
                                     break;

@@ -257,6 +257,8 @@ typedef struct {
     bool aac_initialized;
     uint8_t aac_inbuf[AAC_MAINBUF_SIZE * 2];
     int aac_inbuf_size;
+    int aac_sample_rate;
+    int aac_channels;
 
     // HLS support
     StreamType stream_type;
@@ -1464,6 +1466,7 @@ static void* hls_stream_thread_func(void* arg) {
     }
     radio.aac_initialized = true;
     radio.aac_inbuf_size = 0;
+    radio.aac_sample_rate = 0;  // Will be set on first frame
 
     radio.state = RADIO_STATE_BUFFERING;
 
@@ -1615,6 +1618,16 @@ static void* hls_stream_thread_func(void* arg) {
                     AACFrameInfo frame_info;
                     AACGetLastFrameInfo(radio.aac_decoder, &frame_info);
 
+                    // Update sample rate/channels on first successful decode
+                    if (radio.aac_sample_rate == 0 && frame_info.sampRateOut > 0) {
+                        radio.aac_sample_rate = frame_info.sampRateOut;
+                        radio.aac_channels = frame_info.nChans;
+                        // Reconfigure audio device to match stream's sample rate
+                        Player_setSampleRate(frame_info.sampRateOut);
+                        Player_resumeAudio();  // Resume after reconfiguration
+                        LOG_info("HLS AAC stream sample rate: %d Hz\n", frame_info.sampRateOut);
+                    }
+
                     // Update position based on consumed bytes
                     int consumed = (aac_len - aac_pos) - bytes_left;
                     aac_pos += consumed;
@@ -1758,6 +1771,7 @@ static void* stream_thread_func(void* arg) {
                 if (radio.aac_decoder) {
                     radio.aac_initialized = true;
                     radio.aac_inbuf_size = 0;
+                    radio.aac_sample_rate = 0;  // Will be set on first frame
                     radio.state = RADIO_STATE_BUFFERING;
                 } else {
                     LOG_error("AAC decoder init failed\n");
@@ -1828,6 +1842,16 @@ static void* stream_thread_func(void* arg) {
                 if (err == ERR_AAC_NONE) {
                     AACFrameInfo frame_info;
                     AACGetLastFrameInfo(radio.aac_decoder, &frame_info);
+
+                    // Update sample rate/channels on first successful decode
+                    if (radio.aac_sample_rate == 0 && frame_info.sampRateOut > 0) {
+                        radio.aac_sample_rate = frame_info.sampRateOut;
+                        radio.aac_channels = frame_info.nChans;
+                        // Reconfigure audio device to match stream's sample rate
+                        Player_setSampleRate(frame_info.sampRateOut);
+                        Player_resumeAudio();  // Resume after reconfiguration
+                        LOG_info("AAC Radio stream sample rate: %d Hz\n", frame_info.sampRateOut);
+                    }
 
                     // Consume the decoded data
                     int consumed = radio.aac_inbuf_size - bytes_left;
@@ -1902,6 +1926,10 @@ static void* stream_thread_func(void* arg) {
                     if (radio.mp3_sample_rate == 0) {
                         radio.mp3_sample_rate = frame_info.sample_rate;
                         radio.mp3_channels = frame_info.channels;
+                        // Reconfigure audio device to match stream's sample rate
+                        Player_setSampleRate(frame_info.sample_rate);
+                        Player_resumeAudio();  // Resume after reconfiguration
+                        LOG_info("Radio stream sample rate: %d Hz\n", frame_info.sample_rate);
                     }
 
                     // Consume the frame
@@ -2084,6 +2112,9 @@ void Radio_loadStations(void) {
 
 int Radio_play(const char* url) {
     Radio_stop();
+
+    // Reset audio device to 48000 Hz for radio playback
+    Player_resetSampleRate();
 
     strncpy(radio.current_url, url, RADIO_MAX_URL - 1);
     radio.state = RADIO_STATE_CONNECTING;
@@ -2278,6 +2309,8 @@ void Radio_stop(void) {
         radio.aac_decoder = NULL;
         radio.aac_initialized = false;
         radio.aac_inbuf_size = 0;
+        radio.aac_sample_rate = 0;
+        radio.aac_channels = 0;
     }
 
     // Reset HLS state

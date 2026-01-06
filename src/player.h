@@ -86,6 +86,9 @@ void Player_quit(void);
 // Load a file (does not start playing)
 int Player_load(const char* filepath);
 
+// Preload a file in the background (for faster track transitions)
+void Player_preload(const char* filepath);
+
 // Start/resume playback
 int Player_play(void);
 
