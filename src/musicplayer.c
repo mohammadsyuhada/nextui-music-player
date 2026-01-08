@@ -2265,6 +2265,8 @@ int main(int argc, char* argv[]) {
         LOG_error("Failed to initialize audio player\n");
         goto cleanup;
     }
+    // Sync software volume with system volume at startup
+    Player_setVolume(GetVolume() / 100.0f);
 
     Radio_init();
     YouTube_init();
@@ -2288,6 +2290,30 @@ int main(int argc, char* argv[]) {
     while (!quit) {
         uint32_t frame_start = SDL_GetTicks();
         PAD_poll();
+
+        // Handle volume buttons - works in all states
+        if (PAD_justRepeated(BTN_PLUS)) {
+            // Get current volume from software volume (0.0-1.0) and convert to 0-100
+            int vol = (int)(Player_getVolume() * 100.0f + 0.5f);
+            vol = (vol < 100) ? vol + 5 : 100;
+            // Skip SetVolume() for Bluetooth as it can block
+            if (!Player_isBluetoothActive()) {
+                SetVolume(vol);
+            }
+            // Apply software volume immediately (works for all output devices)
+            Player_setVolume(vol / 100.0f);
+        }
+        else if (PAD_justRepeated(BTN_MINUS)) {
+            // Get current volume from software volume (0.0-1.0) and convert to 0-100
+            int vol = (int)(Player_getVolume() * 100.0f + 0.5f);
+            vol = (vol > 0) ? vol - 5 : 0;
+            // Skip SetVolume() for Bluetooth as it can block
+            if (!Player_isBluetoothActive()) {
+                SetVolume(vol);
+            }
+            // Apply software volume immediately (works for all output devices)
+            Player_setVolume(vol / 100.0f);
+        }
 
         // Handle quit confirmation dialog
         if (show_quit_confirm) {

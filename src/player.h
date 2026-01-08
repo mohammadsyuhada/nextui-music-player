@@ -148,4 +148,7 @@ void Player_resetSampleRate(void);
 // Set audio device to specific sample rate
 void Player_setSampleRate(int sample_rate);
 
+// Check if Bluetooth audio is currently active
+bool Player_isBluetoothActive(void);
+
 #endif
