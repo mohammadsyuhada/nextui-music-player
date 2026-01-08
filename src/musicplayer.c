@@ -2345,15 +2345,15 @@ int main(int argc, char* argv[]) {
                 // Confirm quit
                 quit = true;
             }
-            else if (PAD_justPressed(BTN_B) || PAD_justPressed(BTN_MENU)) {
+            else if (PAD_justPressed(BTN_B) || PAD_justPressed(BTN_START)) {
                 // Cancel quit
                 show_quit_confirm = false;
                 dirty = 1;
             }
             // Skip other input handling while dialog is shown
         }
-        // Handle MENU button to show quit confirmation
-        else if (PAD_justPressed(BTN_MENU)) {
+        // Handle START button to show quit confirmation
+        else if (PAD_justPressed(BTN_START)) {
             show_quit_confirm = true;
             dirty = 1;
         }

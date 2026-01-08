@@ -42,7 +42,7 @@ This pak is designed and tested only for the NextUI and TrimUI Brick @ Trimui Br
 - **D-Pad**: Navigate menus and file browser
 - **A Button**: Select/Confirm
 - **B Button**: Back/Cancel/Exit
-- **Menu**: Exit Application
+- **Start**: Exit Application
 - **Select**: Toggle visualization mode
 - **L/R Shoulders**: Adjust volume
 
@@ -55,13 +55,13 @@ This pak is designed and tested only for the NextUI and TrimUI Brick @ Trimui Br
 - **D-Pad Down**: Prev Track
 - **D-Pad Right**: Fast Foward
 - **D-Pad Left**: Rewind
-- **Menu**: Exit Application
+- **Start**: Exit Application
 
 ### Radio Player
 - **B Button**: Back/Stop
 - **D-Pad Up**: Next Station
 - **D-Pad Down**: Prev Station
-- **Menu**: Exit Application
+- **Start**: Exit Application
 
 ## Usage
 
