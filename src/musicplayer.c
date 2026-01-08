@@ -15,7 +15,6 @@
 #include "utils.h"
 #include "config.h"
 #include "player.h"
-#include "visualizer.h"
 #include "radio.h"
 #include "youtube.h"
 
@@ -2019,13 +2018,12 @@ int main(int argc, char* argv[]) {
     // Seed random number generator for shuffle
     srand((unsigned int)time(NULL));
 
-    // Initialize player, visualizer, and radio
+    // Initialize player and radio
     if (Player_init() != 0) {
         LOG_error("Failed to initialize audio player\n");
         goto cleanup;
     }
 
-    Visualizer_init();
     Radio_init();
     YouTube_init();
 
@@ -2871,7 +2869,6 @@ cleanup:
     YouTube_cleanup();
     Radio_quit();
     Player_quit();
-    Visualizer_quit();
     free_entries();
     unload_custom_fonts();
 

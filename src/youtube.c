@@ -535,9 +535,39 @@ static void* download_thread_func(void* arg) {
             }
 
             if (result == 0 && access(temp_file, F_OK) == 0) {
-                // Move temp to final
-                if (rename(temp_file, output_file) == 0) {
-                    success = true;
+                // Validate MP3 file before moving
+                bool valid_mp3 = false;
+                struct stat st;
+                if (stat(temp_file, &st) == 0 && st.st_size >= 10240) {
+                    // Minimum 10KB for a valid MP3
+                    int fd = open(temp_file, O_RDONLY);
+                    if (fd >= 0) {
+                        unsigned char header[10];
+                        if (read(fd, header, 10) == 10) {
+                            // Check for ID3v2 tag or MP3 sync bytes
+                            if ((header[0] == 'I' && header[1] == 'D' && header[2] == '3') ||
+                                (header[0] == 0xFF && (header[1] & 0xE0) == 0xE0)) {
+                                valid_mp3 = true;
+                            }
+                        }
+                        close(fd);
+                    }
+                }
+
+                if (valid_mp3) {
+                    // Sync file to disk before rename
+                    int fd = open(temp_file, O_RDONLY);
+                    if (fd >= 0) {
+                        fsync(fd);
+                        close(fd);
+                    }
+                    // Move temp to final
+                    if (rename(temp_file, output_file) == 0) {
+                        success = true;
+                    }
+                } else {
+                    LOG_error("Invalid MP3 file: %s\n", temp_file);
+                    unlink(temp_file);
                 }
             } else {
                 // Cleanup temp file

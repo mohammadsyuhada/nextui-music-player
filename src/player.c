@@ -5,6 +5,7 @@
 #include <string.h>
 #include <strings.h>
 #include <unistd.h>
+#include <samplerate.h>
 
 #include "defines.h"
 #include "api.h"
@@ -285,7 +286,7 @@ static void generate_waveform(void) {
 
 // ============ RESAMPLING ============
 
-// Linear interpolation resampler for converting sample rates
+// High-quality resampler using libsamplerate
 // Returns newly allocated buffer on success, NULL on failure
 // Caller must free the returned buffer (different from input)
 // Input must be stereo interleaved 16-bit samples
@@ -297,7 +298,7 @@ static int16_t* resample_linear(int16_t* input, size_t input_frames,
     }
 
     double ratio = (double)dst_rate / (double)src_rate;
-    *output_frames = (size_t)(input_frames * ratio);
+    *output_frames = (size_t)(input_frames * ratio) + 1;  // +1 for safety margin
 
     if (*output_frames == 0) {
         LOG_error("Resample: output_frames is 0, input_frames=%zu, ratio=%.4f\n",
@@ -305,29 +306,66 @@ static int16_t* resample_linear(int16_t* input, size_t input_frames,
         return NULL;
     }
 
-    int16_t* output = malloc(*output_frames * sizeof(int16_t) * AUDIO_CHANNELS);
-    if (!output) {
-        LOG_error("Resample: malloc failed for %zu frames (%zu bytes)\n",
-                  *output_frames, *output_frames * sizeof(int16_t) * AUDIO_CHANNELS);
+    // libsamplerate requires float data
+    size_t input_samples = input_frames * AUDIO_CHANNELS;
+    size_t output_samples = *output_frames * AUDIO_CHANNELS;
+
+    float* float_input = malloc(input_samples * sizeof(float));
+    float* float_output = malloc(output_samples * sizeof(float));
+    if (!float_input || !float_output) {
+        free(float_input);
+        free(float_output);
+        LOG_error("Resample: malloc failed for float buffers\n");
         return NULL;
     }
 
-    for (size_t i = 0; i < *output_frames; i++) {
-        double src_pos = (double)i / ratio;
-        size_t idx0 = (size_t)src_pos;
-        size_t idx1 = idx0 + 1;
-        if (idx1 >= input_frames) idx1 = input_frames - 1;
-
-        double frac = src_pos - idx0;
-
-        // Interpolate left and right channels
-        for (int ch = 0; ch < AUDIO_CHANNELS; ch++) {
-            double s0 = input[idx0 * AUDIO_CHANNELS + ch];
-            double s1 = input[idx1 * AUDIO_CHANNELS + ch];
-            output[i * AUDIO_CHANNELS + ch] = (int16_t)(s0 + frac * (s1 - s0));
-        }
+    // Convert int16 to float (normalize to -1.0 to 1.0)
+    for (size_t i = 0; i < input_samples; i++) {
+        float_input[i] = input[i] / 32768.0f;
     }
 
+    // Setup libsamplerate conversion
+    SRC_DATA src_data;
+    src_data.data_in = float_input;
+    src_data.data_out = float_output;
+    src_data.input_frames = (long)input_frames;
+    src_data.output_frames = (long)*output_frames;
+    src_data.src_ratio = ratio;
+    src_data.end_of_input = 1;
+
+    // Use SRC_SINC_MEDIUM_QUALITY for good balance of quality and speed
+    // SRC_SINC_BEST_QUALITY is higher quality but slower
+    // SRC_SINC_FASTEST is fastest but lower quality
+    int error = src_simple(&src_data, SRC_SINC_MEDIUM_QUALITY, AUDIO_CHANNELS);
+    free(float_input);
+
+    if (error) {
+        LOG_error("Resample: libsamplerate error: %s\n", src_strerror(error));
+        free(float_output);
+        return NULL;
+    }
+
+    // Update actual output frames
+    *output_frames = src_data.output_frames_gen;
+
+    // Allocate final int16 output buffer
+    int16_t* output = malloc(*output_frames * sizeof(int16_t) * AUDIO_CHANNELS);
+    if (!output) {
+        free(float_output);
+        LOG_error("Resample: malloc failed for output buffer\n");
+        return NULL;
+    }
+
+    // Convert float back to int16 with clipping
+    size_t final_samples = *output_frames * AUDIO_CHANNELS;
+    for (size_t i = 0; i < final_samples; i++) {
+        float sample = float_output[i] * 32768.0f;
+        if (sample > 32767.0f) sample = 32767.0f;
+        if (sample < -32768.0f) sample = -32768.0f;
+        output[i] = (int16_t)sample;
+    }
+
+    free(float_output);
     return output;
 }
 
@@ -681,6 +719,17 @@ static int load_mp3(const char* filepath) {
     // Decode to 16-bit PCM
     drmp3_uint64 frames_read = drmp3_read_pcm_frames_s16(&mp3, total_frames, buffer);
     drmp3_uninit(&mp3);
+
+    // Handle incomplete frame reads (truncated/corrupt MP3)
+    if (frames_read < total_frames) {
+        LOG_error("MP3: Only read %llu of %llu frames (file may be truncated)\n",
+                  (unsigned long long)frames_read, (unsigned long long)total_frames);
+        // Resize buffer to actual frames read to avoid playing garbage data
+        // Use source_channels since mono-to-stereo conversion happens later
+        buffer_size = frames_read * sizeof(int16_t) * source_channels;
+        // Update duration based on actual frames
+        player.track_info.duration_ms = (int)((frames_read * 1000) / source_sample_rate);
+    }
 
     // If mono, convert to stereo
     if (source_channels == 1) {
