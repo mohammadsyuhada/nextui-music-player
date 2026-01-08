@@ -592,17 +592,48 @@ static void render_playing(int show_setting) {
     // Hardware status (clock, battery) on right
     GFX_blitHardwareGroup(screen, show_setting);
 
-    // === TRACK INFO SECTION ===
+    // === ALBUM ART AND TRACK INFO SECTION ===
     int info_y = SCALE1(PADDING + 45);
     char truncated[256];
 
-    // Max widths: artist/album = 50% screen, title = full width
-    int max_w_half = (hw - SCALE1(PADDING * 2)) / 2;
-    int max_w_full = hw - SCALE1(PADDING * 2);
+    // Calculate album art dimensions (25% of screen width on right side)
+    SDL_Surface* album_art = Player_getAlbumArt();
+    int art_size = hw / 4;  // 25% of screen width
+    int art_x = hw - SCALE1(PADDING) - art_size;
+    int art_y = info_y;
 
-    // Artist name (Medium font, gray) - max 50% width
+    // Max widths: text takes remaining 75% minus gap for album art
+    int text_area_w = album_art ? (art_x - SCALE1(PADDING * 2)) : (hw - SCALE1(PADDING * 2));
+    int max_w_text = text_area_w;
+
+    // Draw album art on the right (if available)
+    if (album_art) {
+        // Scale album art to fit the art_size while maintaining aspect ratio
+        int src_w = album_art->w;
+        int src_h = album_art->h;
+        int dst_w = art_size;
+        int dst_h = art_size;
+
+        // Calculate scaling to fit within art_size x art_size
+        float scale_w = (float)art_size / src_w;
+        float scale_h = (float)art_size / src_h;
+        float scale = (scale_w < scale_h) ? scale_w : scale_h;
+        dst_w = (int)(src_w * scale);
+        dst_h = (int)(src_h * scale);
+
+        // Center the art within the art area
+        int draw_x = art_x + (art_size - dst_w) / 2;
+        int draw_y = art_y + (art_size - dst_h) / 2;
+
+        // Use SDL_BlitScaled for scaling
+        SDL_Rect src_rect = {0, 0, src_w, src_h};
+        SDL_Rect dst_rect = {draw_x, draw_y, dst_w, dst_h};
+        SDL_BlitScaled(album_art, &src_rect, screen, &dst_rect);
+    }
+
+    // Artist name (Medium font, gray)
     const char* artist = info->artist[0] ? info->artist : "Unknown Artist";
-    GFX_truncateText(get_font_artist(), artist, truncated, max_w_half, 0);
+    GFX_truncateText(get_font_artist(), artist, truncated, max_w_text, 0);
     SDL_Surface* artist_surf = TTF_RenderUTF8_Blended(get_font_artist(), truncated, COLOR_GRAY);
     if (artist_surf) {
         SDL_BlitSurface(artist_surf, NULL, screen, &(SDL_Rect){SCALE1(PADDING), info_y});
@@ -612,9 +643,9 @@ static void render_playing(int show_setting) {
         info_y += SCALE1(18);
     }
 
-    // Song title (Regular font extra large, white) - full width
+    // Song title (Regular font extra large, white)
     const char* title = info->title[0] ? info->title : "Unknown Title";
-    GFX_truncateText(get_font_title(), title, truncated, max_w_full, 0);
+    GFX_truncateText(get_font_title(), title, truncated, max_w_text, 0);
     SDL_Surface* title_surf = TTF_RenderUTF8_Blended(get_font_title(), truncated, COLOR_WHITE);
     if (title_surf) {
         SDL_BlitSurface(title_surf, NULL, screen, &(SDL_Rect){SCALE1(PADDING), info_y});
@@ -624,10 +655,10 @@ static void render_playing(int show_setting) {
         info_y += SCALE1(32);
     }
 
-    // Album name (Bold font smaller, gray) - max 50% width
+    // Album name (Bold font smaller, gray)
     const char* album = info->album[0] ? info->album : "";
     if (album[0]) {
-        GFX_truncateText(get_font_album(), album, truncated, max_w_half, 0);
+        GFX_truncateText(get_font_album(), album, truncated, max_w_text, 0);
         SDL_Surface* album_surf = TTF_RenderUTF8_Blended(get_font_album(), truncated, COLOR_GRAY);
         if (album_surf) {
             SDL_BlitSurface(album_surf, NULL, screen, &(SDL_Rect){SCALE1(PADDING), info_y});

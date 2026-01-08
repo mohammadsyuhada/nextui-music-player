@@ -6,6 +6,7 @@
 #include <strings.h>
 #include <unistd.h>
 #include <samplerate.h>
+#include <SDL2/SDL_image.h>
 
 #include "defines.h"
 #include "api.h"
@@ -1042,7 +1043,7 @@ static void parse_id3v2(const char* filepath) {
 
         if (frame_size == 0 || pos + frame_size > tag_size) break;
 
-        // Only process text frames (TIT2, TPE1, TALB, etc.)
+        // Process text frames (TIT2, TPE1, TALB, etc.)
         if (frame_id[0] == 'T' && frame_size > 1) {
             const uint8_t* frame_data = &tag_data[pos];
             uint8_t encoding = frame_data[0];
@@ -1087,6 +1088,59 @@ static void parse_id3v2(const char* filepath) {
                 copy_metadata_string(player.track_info.artist, temp, sizeof(player.track_info.artist));
             } else if (strcmp(frame_id, "TALB") == 0 && temp[0]) {  // Album
                 copy_metadata_string(player.track_info.album, temp, sizeof(player.track_info.album));
+            }
+        }
+        // Process APIC frame (album art) - only if we don't already have art
+        else if (strcmp(frame_id, "APIC") == 0 && frame_size > 10 && player.album_art == NULL) {
+            const uint8_t* frame_data = &tag_data[pos];
+            uint8_t encoding = frame_data[0];
+            size_t offset = 1;
+
+            // Skip MIME type (null-terminated string)
+            while (offset < frame_size && frame_data[offset] != '\0') offset++;
+            offset++;  // Skip null terminator
+
+            if (offset < frame_size) {
+                uint8_t pic_type = frame_data[offset];
+                offset++;
+
+                // Skip description (null-terminated, encoding-dependent)
+                if (encoding == 1 || encoding == 2) {
+                    // UTF-16: look for double null
+                    while (offset + 1 < frame_size) {
+                        if (frame_data[offset] == 0 && frame_data[offset + 1] == 0) {
+                            offset += 2;
+                            break;
+                        }
+                        offset++;
+                    }
+                } else {
+                    // ISO-8859-1 or UTF-8: single null
+                    while (offset < frame_size && frame_data[offset] != '\0') offset++;
+                    offset++;
+                }
+
+                // Now frame_data + offset points to the image data
+                if (offset < frame_size) {
+                    size_t image_size = frame_size - offset;
+                    const uint8_t* image_data = &frame_data[offset];
+
+                    // Prefer front cover (type 3), but accept any if we have none
+                    if (pic_type == 3 || player.album_art == NULL) {
+                        SDL_RWops* rw = SDL_RWFromConstMem(image_data, image_size);
+                        if (rw) {
+                            SDL_Surface* art = IMG_Load_RW(rw, 1);  // 1 = auto-close RWops
+                            if (art) {
+                                // Free previous art if we're replacing with front cover
+                                if (player.album_art) {
+                                    SDL_FreeSurface(player.album_art);
+                                }
+                                player.album_art = art;
+                                LOG_info("Loaded album art: %dx%d\n", art->w, art->h);
+                            }
+                        }
+                    }
+                }
             }
         }
 
@@ -1364,6 +1418,12 @@ void Player_stop(void) {
     // Clear waveform
     memset(&waveform, 0, sizeof(waveform));
 
+    // Free album art
+    if (player.album_art) {
+        SDL_FreeSurface(player.album_art);
+        player.album_art = NULL;
+    }
+
     pthread_mutex_unlock(&player.mutex);
 }
 
@@ -1447,6 +1507,10 @@ int Player_getVisBuffer(int16_t* buffer, int max_samples) {
 
 const WaveformData* Player_getWaveform(void) {
     return &waveform;
+}
+
+SDL_Surface* Player_getAlbumArt(void) {
+    return player.album_art;
 }
 
 void Player_update(void) {

@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <pthread.h>
+#include <SDL2/SDL.h>
 
 // Audio format types
 typedef enum {
@@ -71,6 +72,9 @@ typedef struct {
     // Current track
     char current_file[512];
     TrackInfo track_info;
+
+    // Album art
+    SDL_Surface* album_art;     // Cached album art surface (NULL if none)
 
     // Playback
     int position_ms;        // Current position in milliseconds
@@ -151,6 +155,9 @@ int Player_getVisBuffer(int16_t* buffer, int max_samples);
 
 // Get waveform overview data (for static waveform progress display)
 const WaveformData* Player_getWaveform(void);
+
+// Get album art surface (NULL if no album art available)
+SDL_Surface* Player_getAlbumArt(void);
 
 // Check if a file format is supported
 AudioFormat Player_detectFormat(const char* filepath);
