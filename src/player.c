@@ -243,10 +243,6 @@ static int stream_decoder_open(StreamDecoder* sd, const char* filepath) {
     }
 
     sd->current_frame = 0;
-    LOG_info("Stream: Opened %s, %d Hz, %d ch, %lld frames (%.1f min)\n",
-             filepath, sd->source_sample_rate, sd->source_channels,
-             (long long)sd->total_frames,
-             (double)sd->total_frames / sd->source_sample_rate / 60.0);
     return 0;
 }
 
@@ -462,12 +458,9 @@ static void* stream_thread_func(void* arg) {
         return NULL;
     }
 
-    LOG_info("Stream thread started\n");
-
     while (player.stream_running) {
         // Check if seeking requested
         if (player.stream_seeking) {
-            LOG_info("Stream: Seeking to frame %lld\n", (long long)player.seek_target_frame);
             stream_decoder_seek(&player.stream_decoder, player.seek_target_frame);
             circular_buffer_clear(&player.stream_buffer);
             if (player.resampler) {
@@ -510,7 +503,6 @@ static void* stream_thread_func(void* arg) {
 
     free(decode_buffer);
     free(resample_buffer);
-    LOG_info("Stream thread stopped\n");
     return NULL;
 }
 
@@ -626,65 +618,45 @@ int Player_init(void) {
     player.state = PLAYER_STATE_STOPPED;
 
     // Initialize SDL audio
-    LOG_info("Initializing SDL audio subsystem...\n");
     if (SDL_InitSubSystem(SDL_INIT_AUDIO) < 0) {
         LOG_error("Failed to init SDL audio: %s\n", SDL_GetError());
         return -1;
     }
 
-    // Log available audio devices
-    int num_devices = SDL_GetNumAudioDevices(0);
-    LOG_info("Available audio devices: %d\n", num_devices);
-    for (int i = 0; i < num_devices; i++) {
-        LOG_info("  Device %d: %s\n", i, SDL_GetAudioDeviceName(i, 0));
-    }
-
     // Check current audio sink setting
     int audio_sink = GetAudioSink();
-    LOG_info("Current audio sink: %d (0=default, 1=bluetooth, 2=usb)\n", audio_sink);
 
     // Also check if .asoundrc exists with bluealsa config (more reliable than msettings)
     const char* home = getenv("HOME");
-    LOG_info("HOME environment: %s\n", home ? home : "(not set)");
 
     if (home) {
         char asoundrc_path[512];
         snprintf(asoundrc_path, sizeof(asoundrc_path), "%s/.asoundrc", home);
         FILE* f = fopen(asoundrc_path, "r");
         if (f) {
-            LOG_info("Found .asoundrc at %s\n", asoundrc_path);
             char buf[256];
             while (fgets(buf, sizeof(buf), f)) {
                 if (strstr(buf, "bluealsa")) {
                     audio_sink = AUDIO_SINK_BLUETOOTH;
                     bluetooth_audio_active = true;
-                    LOG_info("Detected BlueALSA in .asoundrc, using Bluetooth audio\n");
                     break;
                 }
             }
             fclose(f);
-        } else {
-            LOG_info(".asoundrc not found at %s\n", asoundrc_path);
         }
     }
 
     // If Bluetooth audio is detected, set BlueALSA mixer to 100% for software volume control
     if (audio_sink == AUDIO_SINK_BLUETOOTH) {
-        LOG_info("Setting BlueALSA mixer to 100%% for software volume control\n");
         // Set all mixer controls that contain "A2DP" in their name to 100%
         // This handles devices like "Galaxy Buds Live (4B23 A2DP" etc.
-        int ret = system("amixer scontrols 2>/dev/null | grep -i 'A2DP' | "
-                         "sed \"s/.*'\\([^']*\\)'.*/\\1/\" | "
-                         "while read ctrl; do amixer sset \"$ctrl\" 127 2>/dev/null; done");
-        if (ret != 0) {
-            LOG_info("amixer command returned %d\n", ret);
-        }
+        system("amixer scontrols 2>/dev/null | grep -i 'A2DP' | "
+               "sed \"s/.*'\\([^']*\\)'.*/\\1/\" | "
+               "while read ctrl; do amixer sset \"$ctrl\" 127 2>/dev/null; done");
     }
 
     // Determine target sample rate based on audio output
     int target_rate = get_target_sample_rate();
-    LOG_info("Target sample rate: %d Hz (BT=%d, Speaker/USB=%d)\n",
-             target_rate, SAMPLE_RATE_BLUETOOTH, SAMPLE_RATE_SPEAKER);
 
     SDL_AudioSpec want, have;
     SDL_zero(want);
@@ -696,7 +668,6 @@ int Player_init(void) {
     want.userdata = &player;
 
     // Open default audio device - respects .asoundrc for Bluetooth/USB DAC routing
-    LOG_info("Opening default audio device...\n");
     player.audio_device = SDL_OpenAudioDevice(NULL, 0, &want, &have, 0);
 
     if (player.audio_device == 0) {
@@ -704,7 +675,6 @@ int Player_init(void) {
 
         // If Bluetooth was detected but device isn't available, fall back to speaker
         if (bluetooth_audio_active) {
-            LOG_info("Bluetooth audio unavailable, falling back to speaker...\n");
             bluetooth_audio_active = false;
 
             // Retry with speaker sample rate and explicit device name to bypass .asoundrc
@@ -714,10 +684,8 @@ int Player_init(void) {
             int num_devices = SDL_GetNumAudioDevices(0);
             for (int i = 0; i < num_devices; i++) {
                 const char* device_name = SDL_GetAudioDeviceName(i, 0);
-                LOG_info("Trying fallback device %d: %s\n", i, device_name);
                 player.audio_device = SDL_OpenAudioDevice(device_name, 0, &want, &have, 0);
                 if (player.audio_device != 0) {
-                    LOG_info("Fallback to '%s' successful\n", device_name);
                     break;
                 }
             }
@@ -730,9 +698,6 @@ int Player_init(void) {
             return -1;
         }
     }
-
-    LOG_info("Audio device opened successfully (device ID: %d, freq: %d Hz)\n",
-             player.audio_device, have.freq);
 
     player.audio_initialized = true;
 
@@ -747,8 +712,6 @@ static int reconfigure_audio_device(int new_sample_rate) {
     if (new_sample_rate == current_sample_rate && player.audio_device > 0) {
         return 0;  // No change needed
     }
-
-    LOG_info("Reconfiguring audio device to %d Hz\n", new_sample_rate);
 
     // Pause and close existing device
     if (player.audio_device > 0) {
@@ -767,13 +730,11 @@ static int reconfigure_audio_device(int new_sample_rate) {
     want.callback = audio_callback;
     want.userdata = &player;
 
-    LOG_info("Opening audio device...\n");
     player.audio_device = SDL_OpenAudioDevice(NULL, 0, &want, &have, 0);
     if (player.audio_device == 0) {
         LOG_error("Failed to open audio device at %d Hz: %s\n", new_sample_rate, SDL_GetError());
         // Try to reopen at target rate for current audio sink
         int fallback_rate = get_target_sample_rate();
-        LOG_info("Trying fallback rate %d Hz...\n", fallback_rate);
         want.freq = fallback_rate;
         player.audio_device = SDL_OpenAudioDevice(NULL, 0, &want, &have, 0);
         if (player.audio_device == 0) {
@@ -781,15 +742,12 @@ static int reconfigure_audio_device(int new_sample_rate) {
         }
     }
 
-    LOG_info("Audio device opened at %d Hz\n", have.freq);
     current_sample_rate = have.freq;
     return 0;
 }
 
 // Reopen audio device (called when audio sink changes, e.g., Bluetooth connect/disconnect)
 static void reopen_audio_device(void) {
-    LOG_info("Reopening audio device due to audio sink change\n");
-
     // Remember current playback state
     PlayerState prev_state = player.state;
 
@@ -802,7 +760,6 @@ static void reopen_audio_device(void) {
 
     // Get target sample rate for the new audio sink
     int target_rate = get_target_sample_rate();
-    LOG_info("Target sample rate for new sink: %d Hz\n", target_rate);
 
     // Reopen with target sample rate
     SDL_AudioSpec want, have;
@@ -826,13 +783,12 @@ static void reopen_audio_device(void) {
     if (prev_state == PLAYER_STATE_PLAYING) {
         SDL_PauseAudioDevice(player.audio_device, 0);
     }
-
-    LOG_info("Audio device reopened successfully at %d Hz\n", current_sample_rate);
 }
 
 // Callback for audio device changes (Bluetooth connect/disconnect, USB DAC, etc.)
 static void audio_device_change_callback(int device_type, int event) {
-    LOG_info("Audio device changed: type=%d, event=%d\n", device_type, event);
+    (void)device_type;
+    (void)event;
 
     // Re-check if Bluetooth is now active/inactive
     bool was_bluetooth = bluetooth_audio_active;
@@ -856,8 +812,6 @@ static void audio_device_change_callback(int device_type, int event) {
     }
 
     if (was_bluetooth != bluetooth_audio_active) {
-        LOG_info("Bluetooth audio %s\n", bluetooth_audio_active ? "activated" : "deactivated");
-
         // If Bluetooth just activated, set mixer to 100%
         if (bluetooth_audio_active) {
             system("amixer scontrols 2>/dev/null | grep -i 'A2DP' | "
@@ -1163,7 +1117,6 @@ static void parse_id3v2(const char* filepath) {
                                     SDL_FreeSurface(player.album_art);
                                 }
                                 player.album_art = art;
-                                LOG_info("Loaded album art: %dx%d\n", art->w, art->h);
                             }
                         }
                     }
@@ -1323,15 +1276,9 @@ static int load_streaming(const char* filepath) {
         prebuffer_timeout--;
     }
 
-    if (prebuffer_timeout == 0) {
-        LOG_info("Stream: Pre-buffer timeout, continuing anyway\n");
-    }
-
     player.use_streaming = true;
     player.format = player.stream_decoder.format;
 
-    LOG_info("Stream: Loaded successfully, output rate %d Hz, duration %d ms\n",
-             dst_rate, player.track_info.duration_ms);
     return 0;
 }
 

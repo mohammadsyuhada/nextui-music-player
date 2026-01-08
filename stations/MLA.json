@@ -93,12 +93,6 @@
             "slogan": "More the Hitz, One the Time"
         },
         {
-            "name": "Jazz Lounge",
-            "url": "http://eu8.fastcast4u.com:5068/;",
-            "genre": "Jazz",
-            "slogan": ""
-        },
-        {
             "name": "Johor FM",
             "url": "http://playerservices.streamtheworld.com/api/livestream-redirect/JOHOR_FM.mp3",
             "genre": "Regional",
@@ -271,12 +265,6 @@
             "url": "http://playerservices.streamtheworld.com/api/livestream-redirect/SURIA_FM.mp3",
             "genre": "Malay Pop",
             "slogan": "Menceriakan Duniamu"
-        },
-        {
-            "name": "Tamil Maalai",
-            "url": "http://s1.cmesolution.my:8808/jeiradio",
-            "genre": "Tamil",
-            "slogan": ""
         },
         {
             "name": "Terengganu FM",

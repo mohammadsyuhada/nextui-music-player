@@ -7,7 +7,7 @@
 #define RADIO_MAX_STATIONS 32
 #define RADIO_MAX_URL 512
 #define RADIO_MAX_NAME 128
-#define RADIO_BUFFER_SIZE (192 * 1024)  // 192KB buffer (~4.8 seconds at 320kbps)
+#define RADIO_BUFFER_SIZE (64 * 1024)  // 64KB buffer
 
 // Radio station
 typedef struct {

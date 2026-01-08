@@ -81,7 +81,7 @@ typedef struct {
 #define AUDIO_CHANNELS 2
 
 // Ring buffer for decoded audio
-#define AUDIO_RING_SIZE (SAMPLE_RATE * 2 * 10)  // 10 seconds of stereo audio (reduced from 15s to save ~960KB)
+#define AUDIO_RING_SIZE (SAMPLE_RATE * 2 * 15)  // 15 seconds of stereo audio for better buffering
 
 // HLS segment buffer size (reduced from 512KB - typical HLS segment is ~60KB)
 #define HLS_SEGMENT_BUF_SIZE (256 * 1024)
@@ -279,6 +279,10 @@ typedef struct {
     // Pre-allocated HLS buffers (to reduce memory fragmentation)
     uint8_t* hls_segment_buf;        // Segment download buffer
     uint8_t* hls_aac_buf;            // AAC decode buffer
+    uint8_t* hls_prefetch_buf;       // Prefetch buffer for next segment
+    int hls_prefetch_len;            // Length of prefetched data
+    int hls_prefetch_segment;        // Which segment index is prefetched (-1 if none)
+    volatile bool hls_prefetch_ready; // Is prefetch data ready to use?
 
     // TS demuxer state
     int ts_aac_pid;                  // PID of AAC audio stream
@@ -1823,6 +1827,63 @@ static int demux_ts_to_aac(const uint8_t* ts_data, int ts_len, uint8_t* aac_out,
     return aac_pos;
 }
 
+// Prefetch thread state
+static pthread_t hls_prefetch_thread;
+static volatile bool hls_prefetch_thread_active = false;
+
+// HLS segment prefetch worker thread
+static void* hls_prefetch_thread_func(void* arg) {
+    int seg_idx = (int)(intptr_t)arg;
+
+    // Validate segment index
+    if (seg_idx < 0 || seg_idx >= radio.hls.segment_count || radio.should_stop) {
+        return NULL;
+    }
+
+    const char* seg_url = radio.hls.segments[seg_idx].url;
+    if (!seg_url || seg_url[0] == '\0') {
+        return NULL;
+    }
+
+    // Fetch segment into prefetch buffer
+    int len = fetch_url_content(seg_url, radio.hls_prefetch_buf,
+                                HLS_SEGMENT_BUF_SIZE, NULL, 0);
+
+    // Only mark as ready if fetch succeeded and we're not stopping
+    if (len > 0 && !radio.should_stop) {
+        radio.hls_prefetch_len = len;
+        radio.hls_prefetch_segment = seg_idx;
+        radio.hls_prefetch_ready = true;
+    }
+
+    return NULL;
+}
+
+// Start prefetching a segment in the background
+static void start_segment_prefetch(int segment_idx) {
+    // Don't prefetch if stopping or buffer not allocated
+    if (radio.should_stop || !radio.hls_prefetch_buf) {
+        return;
+    }
+
+    // Wait for previous prefetch thread to complete
+    if (hls_prefetch_thread_active) {
+        pthread_join(hls_prefetch_thread, NULL);
+        hls_prefetch_thread_active = false;
+    }
+
+    // Validate segment index
+    if (segment_idx < 0 || segment_idx >= radio.hls.segment_count) {
+        return;
+    }
+
+    // Start prefetch thread
+    if (pthread_create(&hls_prefetch_thread, NULL, hls_prefetch_thread_func,
+                       (void*)(intptr_t)segment_idx) == 0) {
+        hls_prefetch_thread_active = true;
+    }
+}
+
 // HLS streaming thread
 static void* hls_stream_thread_func(void* arg) {
     (void)arg;
@@ -1900,15 +1961,10 @@ static void* hls_stream_thread_func(void* arg) {
             continue;
         }
 
-        // Wait if buffer is getting full to prevent memory pressure
-        if (radio.audio_ring_count > AUDIO_RING_SIZE * 3 / 4) {
-            int wait_count = 0;
-            while (radio.audio_ring_count > AUDIO_RING_SIZE / 2 && !radio.should_stop) {
-                usleep(100000);  // 100ms - wait until buffer drops to 50%
-                wait_count++;
-                if (wait_count % 50 == 0) {  // Log every 5 seconds
-                }
-            }
+        // Wait if buffer is nearly full to prevent overflow
+        // Use high threshold (90%) and short wait to minimize network fetch delays
+        while (radio.audio_ring_count > AUDIO_RING_SIZE * 9 / 10 && !radio.should_stop) {
+            usleep(50000);  // 50ms - short wait, check frequently
         }
         if (radio.should_stop) break;
 
@@ -1944,12 +2000,28 @@ static void* hls_stream_thread_func(void* arg) {
             continue;
         }
 
-        // Fetch segment
-        int seg_len = fetch_url_content(seg_url, segment_buf, HLS_SEGMENT_BUF_SIZE, NULL, 0);
-        if (seg_len <= 0) {
-            LOG_error("[HLS] Failed to fetch segment: %s\n", seg_url);
-            radio.hls.current_segment++;
-            continue;
+        // Check if segment was already prefetched
+        int seg_len;
+        if (radio.hls_prefetch_ready &&
+            radio.hls_prefetch_segment == radio.hls.current_segment) {
+            // Use prefetched data - instant, no network wait
+            seg_len = radio.hls_prefetch_len;
+            memcpy(segment_buf, radio.hls_prefetch_buf, seg_len);
+            radio.hls_prefetch_ready = false;
+        } else {
+            // Fallback: fetch synchronously (first segment or prefetch not ready)
+            seg_len = fetch_url_content(seg_url, segment_buf, HLS_SEGMENT_BUF_SIZE, NULL, 0);
+            if (seg_len <= 0) {
+                LOG_error("[HLS] Failed to fetch segment: %s\n", seg_url);
+                radio.hls.current_segment++;
+                continue;
+            }
+        }
+
+        // Start prefetching next segment in background while we process current one
+        int next_seg = radio.hls.current_segment + 1;
+        if (next_seg < radio.hls.segment_count && !radio.hls_prefetch_ready) {
+            start_segment_prefetch(next_seg);
         }
 
         // Calculate and update bitrate from segment size and duration
@@ -2015,10 +2087,9 @@ static void* hls_stream_thread_func(void* arg) {
                     if (radio.aac_sample_rate == 0 && frame_info.sampRateOut > 0) {
                         radio.aac_sample_rate = frame_info.sampRateOut;
                         radio.aac_channels = frame_info.nChans;
-                        // Defer audio reconfiguration to main thread (non-blocking)
-                        radio.pending_sample_rate = frame_info.sampRateOut;
-                        radio.pending_sample_rate_change = true;
-                        radio.pending_audio_resume = true;
+                        // Reconfigure audio device to match stream's sample rate
+                        Player_setSampleRate(frame_info.sampRateOut);
+                        Player_resumeAudio();  // Resume after reconfiguration
                     }
 
                     // Update position based on consumed bytes
@@ -2029,15 +2100,6 @@ static void* hls_stream_thread_func(void* arg) {
                         frames_decoded++;
 
                         pthread_mutex_lock(&radio.audio_mutex);
-
-                        // Wait if ring buffer is nearly full (>90% capacity)
-                        int wait_count = 0;
-                        while (radio.audio_ring_count > AUDIO_RING_SIZE * 9 / 10 && !radio.should_stop && wait_count < 100) {
-                            pthread_mutex_unlock(&radio.audio_mutex);
-                            usleep(5000);  // 5ms wait for audio callback to consume data
-                            pthread_mutex_lock(&radio.audio_mutex);
-                            wait_count++;
-                        }
 
                         int samples = frame_info.outputSamps;
                         for (int s = 0; s < samples; s++) {
@@ -2059,9 +2121,10 @@ static void* hls_stream_thread_func(void* arg) {
             }
         }
 
-        // Update state based on buffer level (use lower threshold for HLS - 0.5 second of audio)
+        // Update state based on buffer level - require 10 seconds of audio before playing
+        // This provides maximum headroom for network latency
         if (radio.state == RADIO_STATE_BUFFERING &&
-            radio.audio_ring_count > SAMPLE_RATE) {  // 0.5 second of stereo audio (reduced for faster start)
+            radio.audio_ring_count > SAMPLE_RATE * 2 * 10) {  // 10 seconds of stereo audio
             radio.state = RADIO_STATE_PLAYING;
         }
 
@@ -2152,14 +2215,8 @@ static void* stream_thread_func(void* arg) {
                     bytes_to_copy = radio.bytes_until_meta;
                 }
 
-                // Back-pressure: wait if buffer is nearly full to prevent data loss
-                while (radio.stream_buffer_pos + bytes_to_copy > radio.stream_buffer_size * 3 / 4
-                       && !radio.should_stop) {
-                    usleep(5000);  // 5ms wait for decoder to consume data
-                }
-
-                // Add to stream buffer if space available and not stopping
-                if (!radio.should_stop && radio.stream_buffer_pos + bytes_to_copy <= radio.stream_buffer_size) {
+                // Add to stream buffer if space available
+                if (radio.stream_buffer_pos + bytes_to_copy <= radio.stream_buffer_size) {
                     memcpy(radio.stream_buffer + radio.stream_buffer_pos, &recv_buf[i], bytes_to_copy);
                     radio.stream_buffer_pos += bytes_to_copy;
                 }
@@ -2255,10 +2312,9 @@ static void* stream_thread_func(void* arg) {
                     if (radio.aac_sample_rate == 0 && frame_info.sampRateOut > 0) {
                         radio.aac_sample_rate = frame_info.sampRateOut;
                         radio.aac_channels = frame_info.nChans;
-                        // Defer audio reconfiguration to main thread (non-blocking)
-                        radio.pending_sample_rate = frame_info.sampRateOut;
-                        radio.pending_sample_rate_change = true;
-                        radio.pending_audio_resume = true;
+                        // Reconfigure audio device to match stream's sample rate
+                        Player_setSampleRate(frame_info.sampRateOut);
+                        Player_resumeAudio();  // Resume after reconfiguration
                     }
 
                     // Consume the decoded data
@@ -2268,15 +2324,6 @@ static void* stream_thread_func(void* arg) {
 
                     if (frame_info.outputSamps > 0) {
                         pthread_mutex_lock(&radio.audio_mutex);
-
-                        // Wait if ring buffer is nearly full (>90% capacity)
-                        int wait_count = 0;
-                        while (radio.audio_ring_count > AUDIO_RING_SIZE * 9 / 10 && !radio.should_stop && wait_count < 100) {
-                            pthread_mutex_unlock(&radio.audio_mutex);
-                            usleep(5000);  // 5ms wait for audio callback to consume data
-                            pthread_mutex_lock(&radio.audio_mutex);
-                            wait_count++;
-                        }
 
                         // Add to ring buffer (handle mono/stereo)
                         int samples = frame_info.outputSamps;
@@ -2343,10 +2390,9 @@ static void* stream_thread_func(void* arg) {
                     if (radio.mp3_sample_rate == 0) {
                         radio.mp3_sample_rate = frame_info.sample_rate;
                         radio.mp3_channels = frame_info.channels;
-                        // Defer audio reconfiguration to main thread (non-blocking)
-                        radio.pending_sample_rate = frame_info.sample_rate;
-                        radio.pending_sample_rate_change = true;
-                        radio.pending_audio_resume = true;
+                       // Reconfigure audio device to match stream's sample rate
+                        Player_setSampleRate(frame_info.sample_rate);
+                        Player_resumeAudio();  // Resume after reconfiguration
                     }
 
                     // Consume the frame
@@ -2356,15 +2402,6 @@ static void* stream_thread_func(void* arg) {
 
                     // Add decoded samples to ring buffer
                     pthread_mutex_lock(&radio.audio_mutex);
-
-                    // Wait if ring buffer is nearly full (>90% capacity)
-                    int wait_count = 0;
-                    while (radio.audio_ring_count > AUDIO_RING_SIZE * 9 / 10 && !radio.should_stop && wait_count < 100) {
-                        pthread_mutex_unlock(&radio.audio_mutex);
-                        usleep(5000);  // 5ms wait for audio callback to consume data
-                        pthread_mutex_lock(&radio.audio_mutex);
-                        wait_count++;
-                    }
 
                     int total_samples = samples * frame_info.channels;
                     for (int s = 0; s < total_samples; s++) {
@@ -2419,9 +2456,12 @@ int Radio_init(void) {
     // Pre-allocate HLS buffers to reduce memory fragmentation
     radio.hls_segment_buf = malloc(HLS_SEGMENT_BUF_SIZE);
     radio.hls_aac_buf = malloc(HLS_SEGMENT_BUF_SIZE);
+    radio.hls_prefetch_buf = malloc(HLS_SEGMENT_BUF_SIZE);
+    radio.hls_prefetch_segment = -1;
+    radio.hls_prefetch_ready = false;
 
     if (!radio.stream_buffer || !radio.audio_ring ||
-        !radio.hls_segment_buf || !radio.hls_aac_buf) {
+        !radio.hls_segment_buf || !radio.hls_aac_buf || !radio.hls_prefetch_buf) {
         LOG_error("Radio_init: Failed to allocate buffers\n");
         Radio_quit();
         return -1;
@@ -2460,6 +2500,10 @@ void Radio_quit(void) {
     if (radio.hls_aac_buf) {
         free(radio.hls_aac_buf);
         radio.hls_aac_buf = NULL;
+    }
+    if (radio.hls_prefetch_buf) {
+        free(radio.hls_prefetch_buf);
+        radio.hls_prefetch_buf = NULL;
     }
 }
 
@@ -2714,6 +2758,14 @@ void Radio_stop(void) {
         radio.thread_running = false;
     }
 
+    // Wait for prefetch thread to finish
+    if (hls_prefetch_thread_active) {
+        pthread_join(hls_prefetch_thread, NULL);
+        hls_prefetch_thread_active = false;
+    }
+    radio.hls_prefetch_ready = false;
+    radio.hls_prefetch_segment = -1;
+
     // Cleanup SSL if active
     if (radio.use_ssl) {
         ssl_cleanup();
@@ -2752,10 +2804,6 @@ void Radio_stop(void) {
     radio.last_art_artist[0] = '\0';
     radio.last_art_title[0] = '\0';
 
-    // Clear deferred flags
-    radio.pending_sample_rate_change = false;
-    radio.pending_audio_resume = false;
-
     radio.state = RADIO_STATE_STOPPED;
 
     // Pause audio device when radio stops
@@ -2779,26 +2827,27 @@ const char* Radio_getError(void) {
 }
 
 void Radio_update(void) {
-    // Process deferred audio configuration (from stream thread)
-    // This runs in main thread where blocking is acceptable
-    if (radio.pending_sample_rate_change) {
-        Player_setSampleRate(radio.pending_sample_rate);
-        radio.pending_sample_rate_change = false;
-    }
-    if (radio.pending_audio_resume) {
-        Player_resumeAudio();
-        radio.pending_audio_resume = false;
-    }
-
-    // Check for buffer underrun - trigger rebuffering at 1.5 seconds remaining
-    // (SAMPLE_RATE * 6 = 288000 samples = 1.5 seconds of stereo audio)
-    if (radio.state == RADIO_STATE_PLAYING && radio.audio_ring_count < SAMPLE_RATE * 6) {
+    // Check for buffer underrun - transition to buffering when below 2 seconds
+    // This gives time to rebuffer before audio actually runs out
+    if (radio.state == RADIO_STATE_PLAYING && radio.audio_ring_count < SAMPLE_RATE * 2 * 2) {
         radio.state = RADIO_STATE_BUFFERING;
     }
 }
 
 int Radio_getAudioSamples(int16_t* buffer, int max_samples) {
     pthread_mutex_lock(&radio.audio_mutex);
+
+    // Check for underrun and transition to buffering if needed
+    // This provides faster response than waiting for Radio_update()
+    if (radio.state == RADIO_STATE_PLAYING && radio.audio_ring_count < SAMPLE_RATE * 2 * 2) {
+        radio.state = RADIO_STATE_BUFFERING;
+        pthread_mutex_unlock(&radio.audio_mutex);
+        // Fill with silence while buffering
+        for (int i = 0; i < max_samples; i++) {
+            buffer[i] = 0;
+        }
+        return 0;
+    }
 
     int samples_to_read = max_samples;
     if (samples_to_read > radio.audio_ring_count) {
