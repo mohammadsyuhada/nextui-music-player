@@ -660,6 +660,10 @@ static int parse_headers(void) {
 
     radio.bytes_until_meta = radio.icy_metaint;
 
+    LOG_info("[Radio] ICY headers: metaint=%d, bitrate=%d, station='%s', content='%s'\n",
+             radio.icy_metaint, radio.metadata.bitrate,
+             radio.metadata.station_name, radio.metadata.content_type);
+
     // Detect audio format from content type
     radio.audio_format = RADIO_FORMAT_MP3;  // Default to MP3
     const char* ct = radio.metadata.content_type;
@@ -688,6 +692,8 @@ static void parse_icy_metadata(const uint8_t* data, int len) {
     memcpy(meta, data, len);
     meta[len] = '\0';
 
+    LOG_info("[Radio] ICY metadata received (%d bytes)\n", len);
+
     // Save old values to detect changes
     char old_artist[256], old_title[256];
     strncpy(old_artist, radio.metadata.artist, sizeof(old_artist) - 1);
@@ -712,12 +718,17 @@ static void parse_icy_metadata(const uint8_t* data, int len) {
                 radio.metadata.artist[0] = '\0';
             }
 
+            LOG_info("[Radio] Parsed: artist='%s' title='%s'\n", radio.metadata.artist, radio.metadata.title);
+
             // Fetch album art if metadata changed
             if (strcmp(old_artist, radio.metadata.artist) != 0 ||
                 strcmp(old_title, radio.metadata.title) != 0) {
+                LOG_info("[Radio] Metadata changed, fetching album art\n");
                 fetch_album_art_itunes(radio.metadata.artist, radio.metadata.title);
             }
         }
+    } else {
+        LOG_info("[Radio] No StreamTitle found in ICY metadata\n");
     }
 }
 
@@ -934,15 +945,17 @@ typedef struct {
 static int fetch_url_content(const char* url, uint8_t* buffer, int buffer_size, char* content_type, int ct_size) {
 
     if (!url || !buffer || buffer_size <= 0) {
-        LOG_error("[HLS] Invalid parameters to fetch_url_content\n");
+        LOG_error("[Fetch] Invalid parameters to fetch_url_content\n");
         return -1;
     }
+
+    LOG_info("[Fetch] Requesting: %s\n", url);
 
     // Use heap for URL components to reduce stack usage
     char* host = (char*)malloc(256);
     char* path = (char*)malloc(512);
     if (!host || !path) {
-        LOG_error("[HLS] Failed to allocate host/path buffers\n");
+        LOG_error("[Fetch] Failed to allocate host/path buffers\n");
         free(host);
         free(path);
         return -1;
@@ -952,11 +965,13 @@ static int fetch_url_content(const char* url, uint8_t* buffer, int buffer_size, 
     bool is_https;
 
     if (parse_url(url, host, &port, path, &is_https) != 0) {
-        LOG_error("[HLS] Failed to parse URL: %s\n", url);
+        LOG_error("[Fetch] Failed to parse URL: %s\n", url);
         free(host);
         free(path);
         return -1;
     }
+
+    LOG_info("[Fetch] Connecting to %s:%d (HTTPS=%d)\n", host, port, is_https);
 
 
     int sock_fd = -1;
@@ -980,21 +995,25 @@ static int fetch_url_content(const char* url, uint8_t* buffer, int buffer_size, 
         mbedtls_entropy_init(&ssl_ctx->entropy);
         mbedtls_ctr_drbg_init(&ssl_ctx->ctr_drbg);
 
-        if (mbedtls_ctr_drbg_seed(&ssl_ctx->ctr_drbg, mbedtls_entropy_func, &ssl_ctx->entropy,
-                                   (const unsigned char*)pers, strlen(pers)) != 0) {
+        int ret;
+        if ((ret = mbedtls_ctr_drbg_seed(&ssl_ctx->ctr_drbg, mbedtls_entropy_func, &ssl_ctx->entropy,
+                                   (const unsigned char*)pers, strlen(pers))) != 0) {
+            LOG_error("[Fetch] SSL seed failed: %d\n", ret);
             goto cleanup;
         }
 
-        if (mbedtls_ssl_config_defaults(&ssl_ctx->conf, MBEDTLS_SSL_IS_CLIENT,
+        if ((ret = mbedtls_ssl_config_defaults(&ssl_ctx->conf, MBEDTLS_SSL_IS_CLIENT,
                                          MBEDTLS_SSL_TRANSPORT_STREAM,
-                                         MBEDTLS_SSL_PRESET_DEFAULT) != 0) {
+                                         MBEDTLS_SSL_PRESET_DEFAULT)) != 0) {
+            LOG_error("[Fetch] SSL config failed: %d\n", ret);
             goto cleanup;
         }
 
         mbedtls_ssl_conf_authmode(&ssl_ctx->conf, MBEDTLS_SSL_VERIFY_NONE);
         mbedtls_ssl_conf_rng(&ssl_ctx->conf, mbedtls_ctr_drbg_random, &ssl_ctx->ctr_drbg);
 
-        if (mbedtls_ssl_setup(&ssl_ctx->ssl, &ssl_ctx->conf) != 0) {
+        if ((ret = mbedtls_ssl_setup(&ssl_ctx->ssl, &ssl_ctx->conf)) != 0) {
+            LOG_error("[Fetch] SSL setup failed: %d\n", ret);
             goto cleanup;
         }
 
@@ -1003,21 +1022,23 @@ static int fetch_url_content(const char* url, uint8_t* buffer, int buffer_size, 
         char port_str[16];
         snprintf(port_str, sizeof(port_str), "%d", port);
 
-        if (mbedtls_net_connect(&ssl_ctx->net, host, port_str, MBEDTLS_NET_PROTO_TCP) != 0) {
+        if ((ret = mbedtls_net_connect(&ssl_ctx->net, host, port_str, MBEDTLS_NET_PROTO_TCP)) != 0) {
+            LOG_error("[Fetch] TCP connect to %s:%s failed: %d\n", host, port_str, ret);
             goto cleanup;
         }
 
         mbedtls_ssl_set_bio(&ssl_ctx->ssl, &ssl_ctx->net, mbedtls_net_send, mbedtls_net_recv, NULL);
 
-        int ret;
         while ((ret = mbedtls_ssl_handshake(&ssl_ctx->ssl)) != 0) {
             if (ret != MBEDTLS_ERR_SSL_WANT_READ && ret != MBEDTLS_ERR_SSL_WANT_WRITE) {
+                LOG_error("[Fetch] SSL handshake with %s failed: -0x%04X\n", host, -ret);
                 goto cleanup;
             }
         }
 
         ssl_ctx->initialized = true;
         sock_fd = ssl_ctx->net.fd;
+        LOG_info("[Fetch] SSL handshake successful with %s\n", host);
     } else {
 
         // Use getaddrinfo instead of gethostbyname (thread-safe)
@@ -1052,7 +1073,7 @@ static int fetch_url_content(const char* url, uint8_t* buffer, int buffer_size, 
         setsockopt(sock_fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
 
         if (connect(sock_fd, result->ai_addr, result->ai_addrlen) < 0) {
-            LOG_error("[HLS] connect() failed\n");
+            LOG_error("[Fetch] connect() to %s failed: %s\n", host, strerror(errno));
             close(sock_fd);
             freeaddrinfo(result);
             free(host);
@@ -1060,6 +1081,7 @@ static int fetch_url_content(const char* url, uint8_t* buffer, int buffer_size, 
             return -1;
         }
         freeaddrinfo(result);
+        LOG_info("[Fetch] TCP connected to %s\n", host);
     }
 
     // Send HTTP request (use HTTP/1.1 with proper headers for CDN compatibility)
@@ -1082,9 +1104,10 @@ static int fetch_url_content(const char* url, uint8_t* buffer, int buffer_size, 
     }
 
     if (sent < 0) {
-        LOG_error("[HLS] send() failed\n");
+        LOG_error("[Fetch] send() failed\n");
         goto cleanup;
     }
+    LOG_info("[Fetch] HTTP request sent (%d bytes)\n", sent);
 
     // Read response - allocate header buffer on heap to reduce stack pressure
     #define HEADER_BUF_SIZE 2048
@@ -1117,11 +1140,38 @@ static int fetch_url_content(const char* url, uint8_t* buffer, int buffer_size, 
     }
     header_buf[header_pos] = '\0';
 
-    if (!headers_done) goto cleanup;
+    if (!headers_done) {
+        LOG_error("[Fetch] Failed to receive complete headers\n");
+        goto cleanup;
+    }
 
-    // Check for redirect
-    if (strstr(header_buf, "301") || strstr(header_buf, "302") ||
-        strstr(header_buf, "303") || strstr(header_buf, "307")) {
+    // Log HTTP status line (first line of headers)
+    char* first_line_end = strstr(header_buf, "\r\n");
+    if (first_line_end) {
+        char status_line[128];
+        int len = first_line_end - header_buf;
+        if (len > sizeof(status_line) - 1) len = sizeof(status_line) - 1;
+        strncpy(status_line, header_buf, len);
+        status_line[len] = '\0';
+        LOG_info("[Fetch] Response: %s\n", status_line);
+    }
+    LOG_info("[Fetch] Headers received (%d bytes)\n", header_pos);
+
+    // Check for redirect - only check the status line (first line), not entire headers
+    // This avoids false positives from Content-Length or other headers containing "301", "302", etc.
+    bool is_redirect = false;
+    if (first_line_end) {
+        // Check if status line contains redirect codes
+        char* status_start = strstr(header_buf, "HTTP/");
+        if (status_start && status_start < first_line_end) {
+            is_redirect = (strstr(status_start, " 301 ") && strstr(status_start, " 301 ") < first_line_end) ||
+                         (strstr(status_start, " 302 ") && strstr(status_start, " 302 ") < first_line_end) ||
+                         (strstr(status_start, " 303 ") && strstr(status_start, " 303 ") < first_line_end) ||
+                         (strstr(status_start, " 307 ") && strstr(status_start, " 307 ") < first_line_end) ||
+                         (strstr(status_start, " 308 ") && strstr(status_start, " 308 ") < first_line_end);
+        }
+    }
+    if (is_redirect) {
         char* loc = strcasestr(header_buf, "\nLocation:");
         if (loc) {
             loc += 10;
@@ -1153,8 +1203,10 @@ static int fetch_url_content(const char* url, uint8_t* buffer, int buffer_size, 
             free(path);
 
             // Follow redirect
+            LOG_info("[Fetch] Following redirect to: %s\n", redirect_url);
             return fetch_url_content(redirect_url, buffer, buffer_size, content_type, ct_size);
         }
+        LOG_error("[Fetch] Redirect response but no Location header\n");
         goto cleanup;
     }
 
@@ -1176,7 +1228,9 @@ static int fetch_url_content(const char* url, uint8_t* buffer, int buffer_size, 
     }
 
     // Read body
+    LOG_info("[Fetch] Reading body...\n");
     int total_read = 0;
+    int read_attempts = 0;
     while (total_read < buffer_size - 1) {
         int r;
         if (is_https) {
@@ -1185,9 +1239,17 @@ static int fetch_url_content(const char* url, uint8_t* buffer, int buffer_size, 
         } else {
             r = recv(sock_fd, buffer + total_read, buffer_size - total_read - 1, 0);
         }
-        if (r <= 0) break;
+        if (r <= 0) {
+            if (total_read == 0) {
+                LOG_error("[Fetch] Body read failed on first attempt, r=%d, errno=%d (%s)\n",
+                         r, errno, strerror(errno));
+            }
+            break;
+        }
         total_read += r;
+        read_attempts++;
     }
+    LOG_info("[Fetch] Body read complete: %d bytes in %d reads\n", total_read, read_attempts);
 
     // Cleanup
     if (ssl_ctx) {
@@ -1205,9 +1267,11 @@ static int fetch_url_content(const char* url, uint8_t* buffer, int buffer_size, 
     free(header_buf);
     free(host);
     free(path);
+    LOG_info("[Fetch] Success: received %d bytes\n", total_read);
     return total_read;
 
 cleanup:
+    LOG_error("[Fetch] Cleanup: fetch failed\n");
     if (ssl_ctx) {
         if (ssl_ctx->initialized) {
             mbedtls_ssl_close_notify(&ssl_ctx->ssl);
@@ -1377,13 +1441,18 @@ static void url_encode(const char* src, char* dst, int dst_size) {
 // Fetch album art from iTunes Search API (with disk caching)
 // This runs in the streaming thread context
 static void fetch_album_art_itunes(const char* artist, const char* title) {
+    LOG_info("[Radio] fetch_album_art_itunes called: artist='%s' title='%s'\n",
+             artist ? artist : "(null)", title ? title : "(null)");
+
     if (!artist || !title || (artist[0] == '\0' && title[0] == '\0')) {
+        LOG_info("[Radio] Skipping album art: artist/title empty\n");
         return;
     }
 
     // Check if we already fetched art for this track
     if (strcmp(radio.last_art_artist, artist) == 0 &&
         strcmp(radio.last_art_title, title) == 0) {
+        LOG_info("[Radio] Skipping album art: already fetched for this track\n");
         return;  // Already fetched
     }
 
@@ -1418,7 +1487,7 @@ static void fetch_album_art_itunes(const char* artist, const char* title) {
         return;
     }
 
-    // Build search query
+    // Build search query using iTunes API
     char encoded_artist[512];
     char encoded_title[512];
     url_encode(artist, encoded_artist, sizeof(encoded_artist));
@@ -1501,9 +1570,29 @@ static void fetch_album_art_itunes(const char* artist, const char* title) {
         return;
     }
 
-    // Modify URL to get larger image (replace 100x100 with 300x300)
+    // Modify URL to get larger image and convert HTTPS to HTTP for better compatibility
+    // Original: https://is1-ssl.mzstatic.com/image/thumb/.../100x100bb.jpg
+    // Target:   http://is1.mzstatic.com/image/thumb/.../300x300bb.jpg
     char large_artwork_url[512];
-    strncpy(large_artwork_url, artwork_url, sizeof(large_artwork_url) - 1);
+    if (strncmp(artwork_url, "https://", 8) == 0) {
+        // Convert to HTTP and remove -ssl from hostname
+        const char* after_https = artwork_url + 8;  // Skip "https://"
+        char* ssl_pos = strstr(after_https, "-ssl.");
+        if (ssl_pos) {
+            // Build HTTP URL without -ssl
+            int prefix_len = ssl_pos - after_https;
+            snprintf(large_artwork_url, sizeof(large_artwork_url), "http://%.*s%s",
+                     prefix_len, after_https, ssl_pos + 4);  // +4 skips "-ssl"
+        } else {
+            // Just convert https to http
+            snprintf(large_artwork_url, sizeof(large_artwork_url), "http://%s", after_https);
+        }
+    } else {
+        strncpy(large_artwork_url, artwork_url, sizeof(large_artwork_url) - 1);
+    }
+    large_artwork_url[sizeof(large_artwork_url) - 1] = '\0';
+
+    // Replace 100x100 with 300x300 for larger image
     char* size_str = strstr(large_artwork_url, "100x100");
     if (size_str) {
         memcpy(size_str, "300x300", 7);
@@ -1899,6 +1988,13 @@ static void* hls_stream_thread_func(void* arg) {
         const char* seg_title = radio.hls.segments[radio.hls.current_segment].title;
         const char* seg_artist = radio.hls.segments[radio.hls.current_segment].artist;
 
+        // Save old metadata BEFORE any updates to detect changes for album art fetch
+        char old_artist[256], old_title[256];
+        strncpy(old_artist, radio.metadata.artist, sizeof(old_artist) - 1);
+        old_artist[sizeof(old_artist) - 1] = '\0';
+        strncpy(old_title, radio.metadata.title, sizeof(old_title) - 1);
+        old_title[sizeof(old_title) - 1] = '\0';
+
         // Update metadata from EXTINF if available (non-empty)
         if (seg_title && seg_title[0] != '\0') {
             strncpy(radio.metadata.title, seg_title, sizeof(radio.metadata.title) - 1);
@@ -1934,9 +2030,19 @@ static void* hls_stream_thread_func(void* arg) {
         // Check for ID3 metadata at start of segment (common in HLS radio streams)
         int id3_skip = parse_hls_id3_metadata(segment_buf, seg_len);
         if (id3_skip > 0) {
+            LOG_info("[Radio] HLS ID3 metadata found (%d bytes), artist='%s' title='%s'\n",
+                     id3_skip, radio.metadata.artist, radio.metadata.title);
             // Adjust buffer to skip ID3 tag
             seg_len -= id3_skip;
             memmove(segment_buf, segment_buf + id3_skip, seg_len);
+        }
+
+        // Fetch album art if metadata changed (from either EXTINF or ID3)
+        if (strcmp(old_artist, radio.metadata.artist) != 0 ||
+            strcmp(old_title, radio.metadata.title) != 0) {
+            LOG_info("[Radio] HLS metadata changed: '%s - %s' -> '%s - %s'\n",
+                     old_artist, old_title, radio.metadata.artist, radio.metadata.title);
+            fetch_album_art_itunes(radio.metadata.artist, radio.metadata.title);
         }
 
         // Check if segment is MPEG-TS (starts with 0x47) or raw AAC (starts with 0xFF for ADTS)
@@ -2027,6 +2133,7 @@ static void* hls_stream_thread_func(void* arg) {
         if (radio.state == RADIO_STATE_BUFFERING &&
             radio.audio_ring_count > SAMPLE_RATE) {  // 0.5 second of stereo audio (reduced for faster start)
             radio.state = RADIO_STATE_PLAYING;
+            LOG_info("[Radio] HLS stream started playing\n");
         }
 
         // Track the sequence number of the segment we just played (before incrementing)
@@ -2268,6 +2375,7 @@ static void* stream_thread_func(void* arg) {
             if (radio.state == RADIO_STATE_BUFFERING &&
                 radio.audio_ring_count > AUDIO_RING_SIZE * 2 / 3) {
                 radio.state = RADIO_STATE_PLAYING;
+                LOG_info("[Radio] ICY/AAC stream started playing\n");
             }
         } else if (radio.audio_format == RADIO_FORMAT_MP3 && radio.mp3_initialized && radio.stream_buffer_pos >= 1024) {
             // MP3 decoding using low-level frame decoder
@@ -2355,6 +2463,7 @@ static void* stream_thread_func(void* arg) {
             if (radio.state == RADIO_STATE_BUFFERING &&
                 radio.audio_ring_count > AUDIO_RING_SIZE * 2 / 3) {
                 radio.state = RADIO_STATE_PLAYING;
+                LOG_info("[Radio] ICY/MP3 stream started playing\n");
             }
         }
 
@@ -2501,6 +2610,7 @@ void Radio_loadStations(void) {
 }
 
 int Radio_play(const char* url) {
+    LOG_info("[Radio] Starting playback: %s\n", url);
     Radio_stop();
 
     // Reset audio device to 48000 Hz for radio playback
