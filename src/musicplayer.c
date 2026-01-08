@@ -2111,7 +2111,11 @@ int main(int argc, char* argv[]) {
             else if (PAD_justPressed(BTN_A) && browser.entry_count > 0) {
                 FileEntry* entry = &browser.entries[browser.selected];
                 if (entry->is_dir) {
-                    load_directory(entry->path);
+                    // Copy path before load_directory frees browser.entries
+                    char path_copy[512];
+                    strncpy(path_copy, entry->path, sizeof(path_copy) - 1);
+                    path_copy[sizeof(path_copy) - 1] = '\0';
+                    load_directory(path_copy);
                     dirty = 1;
                 } else {
                     // Load and play the file
