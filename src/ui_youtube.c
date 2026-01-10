@@ -4,6 +4,7 @@
 #include "defines.h"
 #include "api.h"
 #include "ui_youtube.h"
+#include "ui_fonts.h"
 #include "ui_utils.h"
 
 // Scroll text state for YouTube results (selected item)
@@ -30,10 +31,10 @@ void render_youtube_menu(SDL_Surface* screen, int show_setting, int menu_selecte
 
     // Title
     const char* title = "MP3 Downloader";
-    int title_width = GFX_truncateText(font.medium, title, truncated, hw - SCALE1(PADDING * 4), SCALE1(BUTTON_PADDING * 2));
+    int title_width = GFX_truncateText(get_font_medium(), title, truncated, hw - SCALE1(PADDING * 4), SCALE1(BUTTON_PADDING * 2));
     GFX_blitPill(ASSET_BLACK_PILL, screen, &(SDL_Rect){SCALE1(PADDING), SCALE1(PADDING), title_width, SCALE1(PILL_SIZE)});
 
-    SDL_Surface* title_text = TTF_RenderUTF8_Blended(font.medium, truncated, COLOR_GRAY);
+    SDL_Surface* title_text = TTF_RenderUTF8_Blended(get_font_medium(), truncated, COLOR_GRAY);
     if (title_text) {
         SDL_BlitSurface(title_text, NULL, screen, &(SDL_Rect){SCALE1(PADDING) + SCALE1(4), SCALE1(PADDING + 4)});
         SDL_FreeSurface(title_text);
@@ -58,7 +59,7 @@ void render_youtube_menu(SDL_Surface* screen, int show_setting, int menu_selecte
         }
 
         SDL_Color text_color = selected ? COLOR_BLACK : COLOR_WHITE;
-        SDL_Surface* text = TTF_RenderUTF8_Blended(font.large, youtube_menu_items[i], text_color);
+        SDL_Surface* text = TTF_RenderUTF8_Blended(get_font_large(), youtube_menu_items[i], text_color);
         if (text) {
             SDL_BlitSurface(text, NULL, screen, &(SDL_Rect){SCALE1(PADDING * 2), y + (SCALE1(PILL_SIZE) - text->h) / 2});
             SDL_FreeSurface(text);
@@ -70,7 +71,7 @@ void render_youtube_menu(SDL_Surface* screen, int show_setting, int menu_selecte
             if (qcount > 0) {
                 char count_str[16];
                 snprintf(count_str, sizeof(count_str), "(%d)", qcount);
-                SDL_Surface* count_text = TTF_RenderUTF8_Blended(font.small, count_str, selected ? COLOR_BLACK : COLOR_GRAY);
+                SDL_Surface* count_text = TTF_RenderUTF8_Blended(get_font_small(), count_str, selected ? COLOR_BLACK : COLOR_GRAY);
                 if (count_text) {
                     SDL_BlitSurface(count_text, NULL, screen, &(SDL_Rect){hw - count_text->w - SCALE1(PADDING * 2), y + (SCALE1(PILL_SIZE) - count_text->h) / 2});
                     SDL_FreeSurface(count_text);
@@ -94,10 +95,10 @@ void render_youtube_searching(SDL_Surface* screen, int show_setting, const char*
 
     // Title
     const char* title = "Searching...";
-    int title_width = GFX_truncateText(font.medium, title, truncated, hw - SCALE1(PADDING * 4), SCALE1(BUTTON_PADDING * 2));
+    int title_width = GFX_truncateText(get_font_medium(), title, truncated, hw - SCALE1(PADDING * 4), SCALE1(BUTTON_PADDING * 2));
     GFX_blitPill(ASSET_BLACK_PILL, screen, &(SDL_Rect){SCALE1(PADDING), SCALE1(PADDING), title_width, SCALE1(PILL_SIZE)});
 
-    SDL_Surface* title_text = TTF_RenderUTF8_Blended(font.medium, truncated, COLOR_GRAY);
+    SDL_Surface* title_text = TTF_RenderUTF8_Blended(get_font_medium(), truncated, COLOR_GRAY);
     if (title_text) {
         SDL_BlitSurface(title_text, NULL, screen, &(SDL_Rect){SCALE1(PADDING) + SCALE1(4), SCALE1(PADDING + 4)});
         SDL_FreeSurface(title_text);
@@ -111,7 +112,7 @@ void render_youtube_searching(SDL_Surface* screen, int show_setting, const char*
     // Searching message
     char search_msg[300];
     snprintf(search_msg, sizeof(search_msg), "Searching for: %s", search_query);
-    SDL_Surface* query_text = TTF_RenderUTF8_Blended(font.medium, search_msg, COLOR_GRAY);
+    SDL_Surface* query_text = TTF_RenderUTF8_Blended(get_font_medium(), search_msg, COLOR_GRAY);
     if (query_text) {
         int qx = (hw - query_text->w) / 2;
         if (qx < SCALE1(PADDING)) qx = SCALE1(PADDING);
@@ -121,7 +122,7 @@ void render_youtube_searching(SDL_Surface* screen, int show_setting, const char*
 
     // Loading indicator
     const char* loading = "Please wait...";
-    SDL_Surface* load_text = TTF_RenderUTF8_Blended(font.medium, loading, COLOR_WHITE);
+    SDL_Surface* load_text = TTF_RenderUTF8_Blended(get_font_medium(), loading, COLOR_WHITE);
     if (load_text) {
         SDL_BlitSurface(load_text, NULL, screen, &(SDL_Rect){(hw - load_text->w) / 2, hh / 2 + SCALE1(10)});
         SDL_FreeSurface(load_text);
@@ -145,10 +146,10 @@ void render_youtube_results(SDL_Surface* screen, int show_setting,
     // Title
     char title[128];
     snprintf(title, sizeof(title), "Results: %s", search_query);
-    int title_width = GFX_truncateText(font.medium, title, truncated, hw - SCALE1(PADDING * 4), SCALE1(BUTTON_PADDING * 2));
+    int title_width = GFX_truncateText(get_font_medium(), title, truncated, hw - SCALE1(PADDING * 4), SCALE1(BUTTON_PADDING * 2));
     GFX_blitPill(ASSET_BLACK_PILL, screen, &(SDL_Rect){SCALE1(PADDING), SCALE1(PADDING), title_width, SCALE1(PILL_SIZE)});
 
-    SDL_Surface* title_text = TTF_RenderUTF8_Blended(font.medium, truncated, COLOR_GRAY);
+    SDL_Surface* title_text = TTF_RenderUTF8_Blended(get_font_medium(), truncated, COLOR_GRAY);
     if (title_text) {
         SDL_BlitSurface(title_text, NULL, screen, &(SDL_Rect){SCALE1(PADDING) + SCALE1(4), SCALE1(PADDING + 4)});
         SDL_FreeSurface(title_text);
@@ -192,7 +193,7 @@ void render_youtube_results(SDL_Surface* screen, int show_setting,
 
         // Show indicator if already in queue
         if (in_queue) {
-            SDL_Surface* indicator = TTF_RenderUTF8_Blended(font.tiny, "[+]", is_selected ? COLOR_BLACK : COLOR_GRAY);
+            SDL_Surface* indicator = TTF_RenderUTF8_Blended(get_font_tiny(), "[+]", is_selected ? COLOR_BLACK : COLOR_GRAY);
             if (indicator) {
                 SDL_BlitSurface(indicator, NULL, screen, &(SDL_Rect){title_x, y + (item_h - indicator->h) / 2});
                 title_x += indicator->w + SCALE1(4);
@@ -207,11 +208,11 @@ void render_youtube_results(SDL_Surface* screen, int show_setting,
 
         if (is_selected) {
             // Selected item: use scrolling text
-            ScrollText_update(&youtube_results_scroll_text, result->title, font.medium, title_max_w,
-                              text_color, screen, title_x, y + (item_h - TTF_FontHeight(font.medium)) / 2);
+            ScrollText_update(&youtube_results_scroll_text, result->title, get_font_large(), title_max_w,
+                              text_color, screen, title_x, y + (item_h - TTF_FontHeight(get_font_large())) / 2);
         } else {
             // Non-selected items: static rendering with clipping
-            SDL_Surface* text = TTF_RenderUTF8_Blended(font.medium, result->title, text_color);
+            SDL_Surface* text = TTF_RenderUTF8_Blended(get_font_large(), result->title, text_color);
             if (text) {
                 SDL_Rect src = {0, 0, text->w > title_max_w ? title_max_w : text->w, text->h};
                 SDL_BlitSurface(text, &src, screen, &(SDL_Rect){title_x, y + (item_h - text->h) / 2, 0, 0});
@@ -225,7 +226,7 @@ void render_youtube_results(SDL_Surface* screen, int show_setting,
             int m = result->duration_sec / 60;
             int s = result->duration_sec % 60;
             snprintf(dur, sizeof(dur), "%d:%02d", m, s);
-            SDL_Surface* dur_text = TTF_RenderUTF8_Blended(font.tiny, dur, is_selected ? COLOR_BLACK : COLOR_GRAY);
+            SDL_Surface* dur_text = TTF_RenderUTF8_Blended(get_font_tiny(), dur, is_selected ? COLOR_BLACK : COLOR_GRAY);
             if (dur_text) {
                 SDL_BlitSurface(dur_text, NULL, screen, &(SDL_Rect){hw - dur_text->w - SCALE1(PADDING * 2), y + (item_h - dur_text->h) / 2});
                 SDL_FreeSurface(dur_text);
@@ -236,7 +237,7 @@ void render_youtube_results(SDL_Surface* screen, int show_setting,
     // Empty results message
     if (result_count == 0) {
         const char* msg = searching ? "Searching..." : "No results found";
-        SDL_Surface* text = TTF_RenderUTF8_Blended(font.medium, msg, COLOR_GRAY);
+        SDL_Surface* text = TTF_RenderUTF8_Blended(get_font_large(), msg, COLOR_GRAY);
         if (text) {
             SDL_BlitSurface(text, NULL, screen, &(SDL_Rect){(hw - text->w) / 2, hh / 2 - text->h / 2});
             SDL_FreeSurface(text);
@@ -248,7 +249,7 @@ void render_youtube_results(SDL_Surface* screen, int show_setting,
         uint32_t now = SDL_GetTicks();
         if (now - toast_time < YOUTUBE_TOAST_DURATION) {
             // Draw toast at bottom center
-            SDL_Surface* toast_text = TTF_RenderUTF8_Blended(font.medium, toast_message, COLOR_WHITE);
+            SDL_Surface* toast_text = TTF_RenderUTF8_Blended(get_font_medium(), toast_message, COLOR_WHITE);
             if (toast_text) {
                 int toast_w = toast_text->w + SCALE1(PADDING * 2);
                 int toast_h = toast_text->h + SCALE1(8);
@@ -293,10 +294,10 @@ void render_youtube_queue(SDL_Surface* screen, int show_setting,
 
     // Title
     const char* title = "Download Queue";
-    int title_width = GFX_truncateText(font.medium, title, truncated, hw - SCALE1(PADDING * 4), SCALE1(BUTTON_PADDING * 2));
+    int title_width = GFX_truncateText(get_font_medium(), title, truncated, hw - SCALE1(PADDING * 4), SCALE1(BUTTON_PADDING * 2));
     GFX_blitPill(ASSET_BLACK_PILL, screen, &(SDL_Rect){SCALE1(PADDING), SCALE1(PADDING), title_width, SCALE1(PILL_SIZE)});
 
-    SDL_Surface* title_text = TTF_RenderUTF8_Blended(font.medium, truncated, COLOR_GRAY);
+    SDL_Surface* title_text = TTF_RenderUTF8_Blended(get_font_medium(), truncated, COLOR_GRAY);
     if (title_text) {
         SDL_BlitSurface(title_text, NULL, screen, &(SDL_Rect){SCALE1(PADDING) + SCALE1(4), SCALE1(PADDING + 4)});
         SDL_FreeSurface(title_text);
@@ -348,7 +349,7 @@ void render_youtube_queue(SDL_Surface* screen, int show_setting,
 
         int title_x = SCALE1(PADDING * 2);  // Default position
         if (status_str) {
-            SDL_Surface* status_text = TTF_RenderUTF8_Blended(font.tiny, status_str, selected ? COLOR_BLACK : status_color);
+            SDL_Surface* status_text = TTF_RenderUTF8_Blended(get_font_tiny(), status_str, selected ? COLOR_BLACK : status_color);
             if (status_text) {
                 SDL_BlitSurface(status_text, NULL, screen, &(SDL_Rect){SCALE1(PADDING * 2), y + (item_h - status_text->h) / 2});
                 title_x = SCALE1(PADDING * 2) + status_text->w + SCALE1(8);
@@ -367,11 +368,11 @@ void render_youtube_queue(SDL_Surface* screen, int show_setting,
 
         if (selected) {
             // Selected item: use scrolling text
-            ScrollText_update(&youtube_queue_scroll_text, item->title, font.medium, title_max_w,
-                              text_color, screen, title_x, y + (item_h - TTF_FontHeight(font.medium)) / 2);
+            ScrollText_update(&youtube_queue_scroll_text, item->title, get_font_large(), title_max_w,
+                              text_color, screen, title_x, y + (item_h - TTF_FontHeight(get_font_large())) / 2);
         } else {
             // Non-selected items: static rendering with clipping
-            SDL_Surface* text = TTF_RenderUTF8_Blended(font.medium, item->title, text_color);
+            SDL_Surface* text = TTF_RenderUTF8_Blended(get_font_large(), item->title, text_color);
             if (text) {
                 SDL_Rect src = {0, 0, text->w > title_max_w ? title_max_w : text->w, text->h};
                 SDL_BlitSurface(text, &src, screen, &(SDL_Rect){title_x, y + (item_h - text->h) / 2, 0, 0});
@@ -400,7 +401,7 @@ void render_youtube_queue(SDL_Surface* screen, int show_setting,
             // Percentage text
             char pct_str[8];
             snprintf(pct_str, sizeof(pct_str), "%d%%", item->progress_percent);
-            SDL_Surface* pct_text = TTF_RenderUTF8_Blended(font.tiny, pct_str, selected ? COLOR_BLACK : COLOR_WHITE);
+            SDL_Surface* pct_text = TTF_RenderUTF8_Blended(get_font_tiny(), pct_str, selected ? COLOR_BLACK : COLOR_WHITE);
             if (pct_text) {
                 SDL_BlitSurface(pct_text, NULL, screen, &(SDL_Rect){bar_x - pct_text->w - SCALE1(4), y + (item_h - pct_text->h) / 2});
                 SDL_FreeSurface(pct_text);
@@ -411,7 +412,7 @@ void render_youtube_queue(SDL_Surface* screen, int show_setting,
     // Empty queue message
     if (qcount == 0) {
         const char* msg = "Queue is empty";
-        SDL_Surface* text = TTF_RenderUTF8_Blended(font.medium, msg, COLOR_GRAY);
+        SDL_Surface* text = TTF_RenderUTF8_Blended(get_font_large(), msg, COLOR_GRAY);
         if (text) {
             SDL_BlitSurface(text, NULL, screen, &(SDL_Rect){(hw - text->w) / 2, hh / 2 - text->h / 2});
             SDL_FreeSurface(text);
@@ -437,10 +438,10 @@ void render_youtube_downloading(SDL_Surface* screen, int show_setting) {
 
     // Title
     const char* title = "Downloading...";
-    int title_width = GFX_truncateText(font.medium, title, truncated, hw - SCALE1(PADDING * 4), SCALE1(BUTTON_PADDING * 2));
+    int title_width = GFX_truncateText(get_font_medium(), title, truncated, hw - SCALE1(PADDING * 4), SCALE1(BUTTON_PADDING * 2));
     GFX_blitPill(ASSET_BLACK_PILL, screen, &(SDL_Rect){SCALE1(PADDING), SCALE1(PADDING), title_width, SCALE1(PILL_SIZE)});
 
-    SDL_Surface* title_text = TTF_RenderUTF8_Blended(font.medium, truncated, COLOR_GRAY);
+    SDL_Surface* title_text = TTF_RenderUTF8_Blended(get_font_medium(), truncated, COLOR_GRAY);
     if (title_text) {
         SDL_BlitSurface(title_text, NULL, screen, &(SDL_Rect){SCALE1(PADDING) + SCALE1(4), SCALE1(PADDING + 4)});
         SDL_FreeSurface(title_text);
@@ -464,7 +465,7 @@ void render_youtube_downloading(SDL_Surface* screen, int show_setting) {
     // Progress info
     char progress[128];
     snprintf(progress, sizeof(progress), "%d / %d completed", status->completed_count, status->total_items);
-    SDL_Surface* prog_text = TTF_RenderUTF8_Blended(font.medium, progress, COLOR_GRAY);
+    SDL_Surface* prog_text = TTF_RenderUTF8_Blended(get_font_medium(), progress, COLOR_GRAY);
     if (prog_text) {
         SDL_BlitSurface(prog_text, NULL, screen, &(SDL_Rect){(hw - prog_text->w) / 2, hh / 2 - SCALE1(50)});
         SDL_FreeSurface(prog_text);
@@ -472,8 +473,8 @@ void render_youtube_downloading(SDL_Surface* screen, int show_setting) {
 
     // Current track
     if (strlen(status->current_title) > 0) {
-        GFX_truncateText(font.small, status->current_title, truncated, hw - SCALE1(PADDING * 4), 0);
-        SDL_Surface* curr_text = TTF_RenderUTF8_Blended(font.small, truncated, COLOR_WHITE);
+        GFX_truncateText(get_font_small(), status->current_title, truncated, hw - SCALE1(PADDING * 4), 0);
+        SDL_Surface* curr_text = TTF_RenderUTF8_Blended(get_font_small(), truncated, COLOR_WHITE);
         if (curr_text) {
             SDL_BlitSurface(curr_text, NULL, screen, &(SDL_Rect){(hw - curr_text->w) / 2, hh / 2 - SCALE1(20)});
             SDL_FreeSurface(curr_text);
@@ -500,7 +501,7 @@ void render_youtube_downloading(SDL_Surface* screen, int show_setting) {
     // Percentage text
     char pct_str[16];
     snprintf(pct_str, sizeof(pct_str), "%d%%", current_progress);
-    SDL_Surface* pct_text = TTF_RenderUTF8_Blended(font.medium, pct_str, COLOR_WHITE);
+    SDL_Surface* pct_text = TTF_RenderUTF8_Blended(get_font_medium(), pct_str, COLOR_WHITE);
     if (pct_text) {
         SDL_BlitSurface(pct_text, NULL, screen, &(SDL_Rect){(hw - pct_text->w) / 2, bar_y + bar_h + SCALE1(8)});
         SDL_FreeSurface(pct_text);
@@ -530,10 +531,10 @@ void render_youtube_updating(SDL_Surface* screen, int show_setting) {
 
     // Title
     const char* title = "Updating yt-dlp";
-    int title_width = GFX_truncateText(font.medium, title, truncated, hw - SCALE1(PADDING * 4), SCALE1(BUTTON_PADDING * 2));
+    int title_width = GFX_truncateText(get_font_medium(), title, truncated, hw - SCALE1(PADDING * 4), SCALE1(BUTTON_PADDING * 2));
     GFX_blitPill(ASSET_BLACK_PILL, screen, &(SDL_Rect){SCALE1(PADDING), SCALE1(PADDING), title_width, SCALE1(PILL_SIZE)});
 
-    SDL_Surface* title_text = TTF_RenderUTF8_Blended(font.medium, truncated, COLOR_GRAY);
+    SDL_Surface* title_text = TTF_RenderUTF8_Blended(get_font_medium(), truncated, COLOR_GRAY);
     if (title_text) {
         SDL_BlitSurface(title_text, NULL, screen, &(SDL_Rect){SCALE1(PADDING) + SCALE1(4), SCALE1(PADDING + 4)});
         SDL_FreeSurface(title_text);
@@ -549,7 +550,7 @@ void render_youtube_updating(SDL_Surface* screen, int show_setting) {
     // Current version
     char ver_str[128];
     snprintf(ver_str, sizeof(ver_str), "Current: %s", status->current_version);
-    SDL_Surface* ver_text = TTF_RenderUTF8_Blended(font.medium, ver_str, COLOR_GRAY);
+    SDL_Surface* ver_text = TTF_RenderUTF8_Blended(get_font_medium(), ver_str, COLOR_GRAY);
     if (ver_text) {
         SDL_BlitSurface(ver_text, NULL, screen, &(SDL_Rect){(hw - ver_text->w) / 2, hh / 2 - SCALE1(50)});
         SDL_FreeSurface(ver_text);
@@ -571,7 +572,7 @@ void render_youtube_updating(SDL_Surface* screen, int show_setting) {
         status_msg = "Already up to date!";
     }
 
-    SDL_Surface* status_text = TTF_RenderUTF8_Blended(font.medium, status_msg, COLOR_WHITE);
+    SDL_Surface* status_text = TTF_RenderUTF8_Blended(get_font_medium(), status_msg, COLOR_WHITE);
     if (status_text) {
         SDL_BlitSurface(status_text, NULL, screen, &(SDL_Rect){(hw - status_text->w) / 2, hh / 2});
         SDL_FreeSurface(status_text);
@@ -580,7 +581,7 @@ void render_youtube_updating(SDL_Surface* screen, int show_setting) {
     // Latest version (if known)
     if (strlen(status->latest_version) > 0) {
         snprintf(ver_str, sizeof(ver_str), "Latest: %s", status->latest_version);
-        SDL_Surface* latest_text = TTF_RenderUTF8_Blended(font.small, ver_str, COLOR_GRAY);
+        SDL_Surface* latest_text = TTF_RenderUTF8_Blended(get_font_small(), ver_str, COLOR_GRAY);
         if (latest_text) {
             SDL_BlitSurface(latest_text, NULL, screen, &(SDL_Rect){(hw - latest_text->w) / 2, hh / 2 + SCALE1(30)});
             SDL_FreeSurface(latest_text);

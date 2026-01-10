@@ -20,10 +20,10 @@ void render_radio_list(SDL_Surface* screen, int show_setting,
 
     // Title
     const char* title = "Internet Radio";
-    int title_width = GFX_truncateText(font.medium, title, truncated, hw - SCALE1(PADDING * 4), SCALE1(BUTTON_PADDING * 2));
+    int title_width = GFX_truncateText(get_font_medium(), title, truncated, hw - SCALE1(PADDING * 4), SCALE1(BUTTON_PADDING * 2));
     GFX_blitPill(ASSET_BLACK_PILL, screen, &(SDL_Rect){SCALE1(PADDING), SCALE1(PADDING), title_width, SCALE1(PILL_SIZE)});
 
-    SDL_Surface* title_text = TTF_RenderUTF8_Blended(font.medium, truncated, COLOR_GRAY);
+    SDL_Surface* title_text = TTF_RenderUTF8_Blended(get_font_medium(), truncated, COLOR_GRAY);
     if (title_text) {
         SDL_BlitSurface(title_text, NULL, screen, &(SDL_Rect){SCALE1(PADDING) + SCALE1(4), SCALE1(PADDING + 4)});
         SDL_FreeSurface(title_text);
@@ -65,7 +65,7 @@ void render_radio_list(SDL_Surface* screen, int show_setting,
 
         // Station name
         SDL_Color text_color = selected ? COLOR_BLACK : COLOR_WHITE;
-        SDL_Surface* name_text = TTF_RenderUTF8_Blended(font.medium, station->name, text_color);
+        SDL_Surface* name_text = TTF_RenderUTF8_Blended(get_font_large(), station->name, text_color);
         if (name_text) {
             int max_width = hw - SCALE1(PADDING * 4);
             SDL_Rect src = {0, 0, name_text->w > max_width ? max_width : name_text->w, name_text->h};
@@ -76,7 +76,7 @@ void render_radio_list(SDL_Surface* screen, int show_setting,
         // Genre (if available)
         if (station->genre[0]) {
             SDL_Color genre_color = selected ? COLOR_GRAY : COLOR_DARK_TEXT;
-            SDL_Surface* genre_text = TTF_RenderUTF8_Blended(font.tiny, station->genre, genre_color);
+            SDL_Surface* genre_text = TTF_RenderUTF8_Blended(get_font_tiny(), station->genre, genre_color);
             if (genre_text) {
                 SDL_BlitSurface(genre_text, NULL, screen, &(SDL_Rect){hw - genre_text->w - SCALE1(PADDING * 2), y + (item_h - genre_text->h) / 2});
                 SDL_FreeSurface(genre_text);
@@ -347,7 +347,7 @@ void render_radio_playing(SDL_Surface* screen, int show_setting, int radio_selec
 
     // Error message (displayed prominently if in error state)
     if (state == RADIO_STATE_ERROR) {
-        SDL_Surface* err_text = TTF_RenderUTF8_Blended(font.small, Radio_getError(), (SDL_Color){255, 100, 100, 255});
+        SDL_Surface* err_text = TTF_RenderUTF8_Blended(get_font_small(), Radio_getError(), (SDL_Color){255, 100, 100, 255});
         if (err_text) {
             SDL_BlitSurface(err_text, NULL, screen, &(SDL_Rect){SCALE1(PADDING), vis_y - SCALE1(20)});
             SDL_FreeSurface(err_text);
@@ -370,10 +370,10 @@ void render_radio_add(SDL_Surface* screen, int show_setting,
 
     // Title
     const char* title = "Add Stations";
-    int title_width = GFX_truncateText(font.medium, title, truncated, hw - SCALE1(PADDING * 4), SCALE1(BUTTON_PADDING * 2));
+    int title_width = GFX_truncateText(get_font_medium(), title, truncated, hw - SCALE1(PADDING * 4), SCALE1(BUTTON_PADDING * 2));
     GFX_blitPill(ASSET_BLACK_PILL, screen, &(SDL_Rect){SCALE1(PADDING), SCALE1(PADDING), title_width, SCALE1(PILL_SIZE)});
 
-    SDL_Surface* title_text = TTF_RenderUTF8_Blended(font.medium, truncated, COLOR_GRAY);
+    SDL_Surface* title_text = TTF_RenderUTF8_Blended(get_font_medium(), truncated, COLOR_GRAY);
     if (title_text) {
         SDL_BlitSurface(title_text, NULL, screen, &(SDL_Rect){SCALE1(PADDING) + SCALE1(4), SCALE1(PADDING + 4)});
         SDL_FreeSurface(title_text);
@@ -386,7 +386,7 @@ void render_radio_add(SDL_Surface* screen, int show_setting,
 
     // Subtitle
     const char* subtitle = "Select Country";
-    SDL_Surface* sub_text = TTF_RenderUTF8_Blended(font.small, subtitle, COLOR_GRAY);
+    SDL_Surface* sub_text = TTF_RenderUTF8_Blended(get_font_small(), subtitle, COLOR_GRAY);
     if (sub_text) {
         SDL_BlitSurface(sub_text, NULL, screen, &(SDL_Rect){SCALE1(PADDING), SCALE1(PADDING + PILL_SIZE + 4)});
         SDL_FreeSurface(sub_text);
@@ -423,7 +423,7 @@ void render_radio_add(SDL_Surface* screen, int show_setting,
 
         // Country name
         SDL_Color text_color = selected ? COLOR_BLACK : COLOR_WHITE;
-        SDL_Surface* name_text = TTF_RenderUTF8_Blended(font.medium, country->name, text_color);
+        SDL_Surface* name_text = TTF_RenderUTF8_Blended(get_font_large(), country->name, text_color);
         if (name_text) {
             SDL_BlitSurface(name_text, NULL, screen, &(SDL_Rect){SCALE1(PADDING * 2), y + (item_h - name_text->h) / 2});
             SDL_FreeSurface(name_text);
@@ -434,7 +434,7 @@ void render_radio_add(SDL_Surface* screen, int show_setting,
         char count_str[32];
         snprintf(count_str, sizeof(count_str), "%d stations", station_count);
         SDL_Color count_color = selected ? COLOR_GRAY : COLOR_DARK_TEXT;
-        SDL_Surface* count_text = TTF_RenderUTF8_Blended(font.tiny, count_str, count_color);
+        SDL_Surface* count_text = TTF_RenderUTF8_Blended(get_font_tiny(), count_str, count_color);
         if (count_text) {
             SDL_BlitSurface(count_text, NULL, screen, &(SDL_Rect){hw - count_text->w - SCALE1(PADDING * 2), y + (item_h - count_text->h) / 2});
             SDL_FreeSurface(count_text);
@@ -480,10 +480,10 @@ void render_radio_add_stations(SDL_Surface* screen, int show_setting,
     }
 
     // Title
-    int title_width = GFX_truncateText(font.medium, country_name, truncated, hw - SCALE1(PADDING * 4), SCALE1(BUTTON_PADDING * 2));
+    int title_width = GFX_truncateText(get_font_medium(), country_name, truncated, hw - SCALE1(PADDING * 4), SCALE1(BUTTON_PADDING * 2));
     GFX_blitPill(ASSET_BLACK_PILL, screen, &(SDL_Rect){SCALE1(PADDING), SCALE1(PADDING), title_width, SCALE1(PILL_SIZE)});
 
-    SDL_Surface* title_text = TTF_RenderUTF8_Blended(font.medium, truncated, COLOR_GRAY);
+    SDL_Surface* title_text = TTF_RenderUTF8_Blended(get_font_medium(), truncated, COLOR_GRAY);
     if (title_text) {
         SDL_BlitSurface(title_text, NULL, screen, &(SDL_Rect){SCALE1(PADDING) + SCALE1(4), SCALE1(PADDING + 4)});
         SDL_FreeSurface(title_text);
@@ -507,7 +507,7 @@ void render_radio_add_stations(SDL_Surface* screen, int show_setting,
     // Subtitle with selection count
     char subtitle[64];
     snprintf(subtitle, sizeof(subtitle), "%d selected", selected_count);
-    SDL_Surface* sub_text = TTF_RenderUTF8_Blended(font.small, subtitle, COLOR_GRAY);
+    SDL_Surface* sub_text = TTF_RenderUTF8_Blended(get_font_small(), subtitle, COLOR_GRAY);
     if (sub_text) {
         SDL_BlitSurface(sub_text, NULL, screen, &(SDL_Rect){SCALE1(PADDING), SCALE1(PADDING + PILL_SIZE + 4)});
         SDL_FreeSurface(sub_text);
@@ -543,7 +543,7 @@ void render_radio_add_stations(SDL_Surface* screen, int show_setting,
         // Checkbox indicator
         const char* checkbox = checked ? "[x]" : "[ ]";
         SDL_Color cb_color = selected ? COLOR_BLACK : COLOR_WHITE;
-        SDL_Surface* cb_text = TTF_RenderUTF8_Blended(font.small, checkbox, cb_color);
+        SDL_Surface* cb_text = TTF_RenderUTF8_Blended(get_font_small(), checkbox, cb_color);
         int cb_width = 0;
         if (cb_text) {
             SDL_BlitSurface(cb_text, NULL, screen, &(SDL_Rect){SCALE1(PADDING * 2), y + (item_h - cb_text->h) / 2});
@@ -553,7 +553,7 @@ void render_radio_add_stations(SDL_Surface* screen, int show_setting,
 
         // Station name
         SDL_Color text_color = selected ? COLOR_BLACK : COLOR_WHITE;
-        SDL_Surface* name_text = TTF_RenderUTF8_Blended(font.medium, station->name, text_color);
+        SDL_Surface* name_text = TTF_RenderUTF8_Blended(get_font_large(), station->name, text_color);
         if (name_text) {
             int max_width = hw - SCALE1(PADDING * 4) - cb_width - SCALE1(60);
             SDL_Rect src = {0, 0, name_text->w > max_width ? max_width : name_text->w, name_text->h};
@@ -564,7 +564,7 @@ void render_radio_add_stations(SDL_Surface* screen, int show_setting,
         // Genre on right
         if (station->genre[0]) {
             SDL_Color genre_color = selected ? COLOR_GRAY : COLOR_DARK_TEXT;
-            SDL_Surface* genre_text = TTF_RenderUTF8_Blended(font.tiny, station->genre, genre_color);
+            SDL_Surface* genre_text = TTF_RenderUTF8_Blended(get_font_tiny(), station->genre, genre_color);
             if (genre_text) {
                 SDL_BlitSurface(genre_text, NULL, screen, &(SDL_Rect){hw - genre_text->w - SCALE1(PADDING * 2), y + (item_h - genre_text->h) / 2});
                 SDL_FreeSurface(genre_text);
@@ -598,10 +598,10 @@ void render_radio_help(SDL_Surface* screen, int show_setting, int* help_scroll) 
 
     // Title
     const char* title = "How to Add Stations";
-    int title_width = GFX_truncateText(font.medium, title, truncated, hw - SCALE1(PADDING * 4), SCALE1(BUTTON_PADDING * 2));
+    int title_width = GFX_truncateText(get_font_medium(), title, truncated, hw - SCALE1(PADDING * 4), SCALE1(BUTTON_PADDING * 2));
     GFX_blitPill(ASSET_BLACK_PILL, screen, &(SDL_Rect){SCALE1(PADDING), SCALE1(PADDING), title_width, SCALE1(PILL_SIZE)});
 
-    SDL_Surface* title_text = TTF_RenderUTF8_Blended(font.medium, truncated, COLOR_GRAY);
+    SDL_Surface* title_text = TTF_RenderUTF8_Blended(get_font_medium(), truncated, COLOR_GRAY);
     if (title_text) {
         SDL_BlitSurface(title_text, NULL, screen, &(SDL_Rect){SCALE1(PADDING) + SCALE1(4), SCALE1(PADDING + 4)});
         SDL_FreeSurface(title_text);
@@ -678,14 +678,14 @@ void render_radio_help(SDL_Surface* screen, int show_setting, int* help_scroll) 
         }
 
         SDL_Color color = COLOR_WHITE;
-        TTF_Font* use_font = font.small;
+        TTF_Font* use_font = get_font_small();
 
         // Highlight special lines
         if (strstr(lines[i], "Example:") || strstr(lines[i], "Notes:")) {
             color = COLOR_GRAY;
         } else if (lines[i][0] == '-') {
             color = COLOR_GRAY;
-            use_font = font.tiny;
+            use_font = get_font_tiny();
         }
 
         SDL_Surface* line_text = TTF_RenderUTF8_Blended(use_font, lines[i], color);

@@ -29,10 +29,10 @@ void render_browser(SDL_Surface* screen, int show_setting, BrowserContext* brows
 
     // Title pill
     const char* title = "Music Player";
-    int title_width = GFX_truncateText(font.medium, title, truncated, hw - SCALE1(PADDING * 4), SCALE1(BUTTON_PADDING * 2));
+    int title_width = GFX_truncateText(get_font_medium(), title, truncated, hw - SCALE1(PADDING * 4), SCALE1(BUTTON_PADDING * 2));
     GFX_blitPill(ASSET_BLACK_PILL, screen, &(SDL_Rect){SCALE1(PADDING), SCALE1(PADDING), title_width, SCALE1(PILL_SIZE)});
 
-    SDL_Surface* title_text = TTF_RenderUTF8_Blended(font.medium, truncated, COLOR_GRAY);
+    SDL_Surface* title_text = TTF_RenderUTF8_Blended(get_font_medium(), truncated, COLOR_GRAY);
     if (title_text) {
         SDL_BlitSurface(title_text, NULL, screen, &(SDL_Rect){SCALE1(PADDING) + SCALE1(4), SCALE1(PADDING + 4)});
         SDL_FreeSurface(title_text);
@@ -83,15 +83,15 @@ void render_browser(SDL_Surface* screen, int show_setting, BrowserContext* brows
 
         SDL_Color text_color = selected ? COLOR_BLACK : COLOR_WHITE;
         int text_x = SCALE1(PADDING * 2);
-        int text_y = y + (item_h - TTF_FontHeight(font.medium)) / 2;
+        int text_y = y + (item_h - TTF_FontHeight(get_font_large())) / 2;
 
         if (selected) {
             // Selected item: use scrolling text
-            ScrollText_update(&browser_scroll, display, font.medium, max_width,
+            ScrollText_update(&browser_scroll, display, get_font_large(), max_width,
                               text_color, screen, text_x, text_y);
         } else {
             // Non-selected items: static rendering with clipping
-            SDL_Surface* text = TTF_RenderUTF8_Blended(font.medium, display, text_color);
+            SDL_Surface* text = TTF_RenderUTF8_Blended(get_font_large(), display, text_color);
             if (text) {
                 SDL_Rect src = {0, 0, text->w > max_width ? max_width : text->w, text->h};
                 SDL_BlitSurface(text, &src, screen, &(SDL_Rect){text_x, text_y, 0, 0});
@@ -114,7 +114,7 @@ void render_browser(SDL_Surface* screen, int show_setting, BrowserContext* brows
     // Empty folder message
     if (browser->entry_count == 0) {
         const char* msg = "No music files found";
-        SDL_Surface* text = TTF_RenderUTF8_Blended(font.medium, msg, COLOR_GRAY);
+        SDL_Surface* text = TTF_RenderUTF8_Blended(get_font_large(), msg, COLOR_GRAY);
         if (text) {
             SDL_BlitSurface(text, NULL, screen, &(SDL_Rect){(hw - text->w) / 2, hh / 2 - text->h / 2});
             SDL_FreeSurface(text);
@@ -362,7 +362,7 @@ void render_quit_confirm(SDL_Surface* screen) {
 
     // Message text
     const char* msg = "Quit Music Player?";
-    SDL_Surface* msg_surf = TTF_RenderUTF8_Blended(font.medium, msg, COLOR_WHITE);
+    SDL_Surface* msg_surf = TTF_RenderUTF8_Blended(get_font_medium(), msg, COLOR_WHITE);
     if (msg_surf) {
         SDL_BlitSurface(msg_surf, NULL, screen, &(SDL_Rect){(hw - msg_surf->w) / 2, box_y + SCALE1(20)});
         SDL_FreeSurface(msg_surf);
@@ -370,7 +370,7 @@ void render_quit_confirm(SDL_Surface* screen) {
 
     // Button hints
     const char* hint = "A: Yes   B: No";
-    SDL_Surface* hint_surf = TTF_RenderUTF8_Blended(font.small, hint, COLOR_GRAY);
+    SDL_Surface* hint_surf = TTF_RenderUTF8_Blended(get_font_small(), hint, COLOR_GRAY);
     if (hint_surf) {
         SDL_BlitSurface(hint_surf, NULL, screen, &(SDL_Rect){(hw - hint_surf->w) / 2, box_y + SCALE1(55)});
         SDL_FreeSurface(hint_surf);
@@ -393,10 +393,10 @@ void render_menu(SDL_Surface* screen, int show_setting, int menu_selected) {
 
     // Title
     const char* title = "Music Player";
-    int title_width = GFX_truncateText(font.medium, title, truncated, hw - SCALE1(PADDING * 4), SCALE1(BUTTON_PADDING * 2));
+    int title_width = GFX_truncateText(get_font_medium(), title, truncated, hw - SCALE1(PADDING * 4), SCALE1(BUTTON_PADDING * 2));
     GFX_blitPill(ASSET_BLACK_PILL, screen, &(SDL_Rect){SCALE1(PADDING), SCALE1(PADDING), title_width, SCALE1(PILL_SIZE)});
 
-    SDL_Surface* title_text = TTF_RenderUTF8_Blended(font.medium, truncated, COLOR_GRAY);
+    SDL_Surface* title_text = TTF_RenderUTF8_Blended(get_font_medium(), truncated, COLOR_GRAY);
     if (title_text) {
         SDL_BlitSurface(title_text, NULL, screen, &(SDL_Rect){SCALE1(PADDING) + SCALE1(4), SCALE1(PADDING + 4)});
         SDL_FreeSurface(title_text);
@@ -432,7 +432,7 @@ void render_menu(SDL_Surface* screen, int show_setting, int menu_selected) {
         }
 
         SDL_Color text_color = selected ? COLOR_BLACK : COLOR_WHITE;
-        SDL_Surface* text = TTF_RenderUTF8_Blended(font.large, label, text_color);
+        SDL_Surface* text = TTF_RenderUTF8_Blended(get_font_large(), label, text_color);
         if (text) {
             SDL_BlitSurface(text, NULL, screen, &(SDL_Rect){SCALE1(PADDING * 2), y + (SCALE1(PILL_SIZE) - text->h) / 2});
             SDL_FreeSurface(text);

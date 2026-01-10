@@ -20,10 +20,10 @@ void render_app_updating(SDL_Surface* screen, int show_setting) {
 
     // Title
     const char* title = "App Update";
-    int title_width = GFX_truncateText(font.medium, title, truncated, hw - SCALE1(PADDING * 4), SCALE1(BUTTON_PADDING * 2));
+    int title_width = GFX_truncateText(get_font_medium(), title, truncated, hw - SCALE1(PADDING * 4), SCALE1(BUTTON_PADDING * 2));
     GFX_blitPill(ASSET_BLACK_PILL, screen, &(SDL_Rect){SCALE1(PADDING), SCALE1(PADDING), title_width, SCALE1(PILL_SIZE)});
 
-    SDL_Surface* title_text = TTF_RenderUTF8_Blended(font.medium, truncated, COLOR_GRAY);
+    SDL_Surface* title_text = TTF_RenderUTF8_Blended(get_font_medium(), truncated, COLOR_GRAY);
     if (title_text) {
         SDL_BlitSurface(title_text, NULL, screen, &(SDL_Rect){SCALE1(PADDING) + SCALE1(4), SCALE1(PADDING + 4)});
         SDL_FreeSurface(title_text);
@@ -52,7 +52,7 @@ void render_app_updating(SDL_Surface* screen, int show_setting) {
         snprintf(ver_str, sizeof(ver_str), "v%s", curr);
     }
     int ver_y = SCALE1(PADDING * 3 + 35);
-    SDL_Surface* ver_text = TTF_RenderUTF8_Blended(font.medium, ver_str, COLOR_GRAY);
+    SDL_Surface* ver_text = TTF_RenderUTF8_Blended(get_font_medium(), ver_str, COLOR_GRAY);
     if (ver_text) {
         SDL_BlitSurface(ver_text, NULL, screen, &(SDL_Rect){(hw - ver_text->w) / 2, ver_y});
         SDL_FreeSurface(ver_text);
@@ -127,7 +127,7 @@ void render_app_updating(SDL_Surface* screen, int show_setting) {
         }
     } else if (state == SELFUPDATE_STATE_CHECKING) {
         // Show checking message
-        SDL_Surface* check_text = TTF_RenderUTF8_Blended(font.small, "Checking for updates...", COLOR_GRAY);
+        SDL_Surface* check_text = TTF_RenderUTF8_Blended(get_font_small(), "Checking for updates...", COLOR_GRAY);
         if (check_text) {
             SDL_BlitSurface(check_text, NULL, screen, &(SDL_Rect){(hw - check_text->w) / 2, notes_y});
             SDL_FreeSurface(check_text);
@@ -169,7 +169,7 @@ void render_app_updating(SDL_Surface* screen, int show_setting) {
             status_color = (SDL_Color){100, 255, 100, 255};
         }
 
-        SDL_Surface* status_text = TTF_RenderUTF8_Blended(font.small, status_msg, status_color);
+        SDL_Surface* status_text = TTF_RenderUTF8_Blended(get_font_small(), status_msg, status_color);
         if (status_text) {
             SDL_BlitSurface(status_text, NULL, screen, &(SDL_Rect){(hw - status_text->w) / 2, hh - SCALE1(PILL_SIZE + PADDING * 4)});
             SDL_FreeSurface(status_text);
@@ -196,10 +196,10 @@ void render_about(SDL_Surface* screen, int show_setting) {
 
     // Title
     const char* title = "About";
-    int title_width = GFX_truncateText(font.medium, title, truncated, hw - SCALE1(PADDING * 4), SCALE1(BUTTON_PADDING * 2));
+    int title_width = GFX_truncateText(get_font_medium(), title, truncated, hw - SCALE1(PADDING * 4), SCALE1(BUTTON_PADDING * 2));
     GFX_blitPill(ASSET_BLACK_PILL, screen, &(SDL_Rect){SCALE1(PADDING), SCALE1(PADDING), title_width, SCALE1(PILL_SIZE)});
 
-    SDL_Surface* title_text = TTF_RenderUTF8_Blended(font.medium, truncated, COLOR_GRAY);
+    SDL_Surface* title_text = TTF_RenderUTF8_Blended(get_font_medium(), truncated, COLOR_GRAY);
     if (title_text) {
         SDL_BlitSurface(title_text, NULL, screen, &(SDL_Rect){SCALE1(PADDING) + SCALE1(4), SCALE1(PADDING + 4)});
         SDL_FreeSurface(title_text);
@@ -216,7 +216,7 @@ void render_about(SDL_Surface* screen, int show_setting) {
     if (ver[0] == 'v' || ver[0] == 'V') ver++;
     char app_name[128];
     snprintf(app_name, sizeof(app_name), "Music Player (v%s)", ver);
-    SDL_Surface* name_text = TTF_RenderUTF8_Blended(font.large, app_name, COLOR_WHITE);
+    SDL_Surface* name_text = TTF_RenderUTF8_Blended(get_font_large(), app_name, COLOR_WHITE);
     if (name_text) {
         SDL_BlitSurface(name_text, NULL, screen, &(SDL_Rect){(hw - name_text->w) / 2, SCALE1(PADDING * 3 + PILL_SIZE)});
         SDL_FreeSurface(name_text);

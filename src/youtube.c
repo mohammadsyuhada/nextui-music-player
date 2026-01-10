@@ -955,9 +955,8 @@ char* YouTube_openKeyboard(const char* prompt) {
         return NULL;
     }
 
-    // Get font path (minui.ttf should be in pak/fonts folder)
-    char font_path[600];
-    snprintf(font_path, sizeof(font_path), "%s/fonts/minui.ttf", pak_path);
+    // Use the same custom font as the rest of the application
+    const char* font_path = RES_PATH "/font1.ttf";
 
     char cmd[1024];
     snprintf(cmd, sizeof(cmd), "%s \"%s\" 2>/dev/null", keyboard_path, font_path);
