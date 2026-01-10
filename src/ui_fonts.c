@@ -5,6 +5,7 @@
 
 #include "defines.h"
 #include "api.h"
+#include "config.h"
 #include "ui_fonts.h"
 
 // Path to Next font (font1.ttf) - supports CJK characters
@@ -96,4 +97,23 @@ TTF_Font* get_font_small(void) {
 // Tiny font (genre, bitrate)
 TTF_Font* get_font_tiny(void) {
     return custom_font.loaded ? custom_font.tiny : font.tiny;
+}
+
+// Get text color for list items based on selection state
+SDL_Color get_list_text_color(bool selected) {
+    return selected ? uintToColour(THEME_COLOR5_255) : uintToColour(THEME_COLOR4_255);
+}
+
+// Draw list item background pill (only draws if selected)
+void draw_list_item_bg(SDL_Surface* screen, SDL_Rect* rect, bool selected) {
+    if (selected) {
+        GFX_blitPillColor(ASSET_WHITE_PILL, screen, rect, THEME_COLOR1, RGB_WHITE);
+    }
+}
+
+// Calculate pill width for list items
+int calc_list_pill_width(TTF_Font* font, const char* text, char* truncated, int max_width, int prefix_width) {
+    int available_width = max_width - prefix_width;
+    int text_width = GFX_truncateText(font, text, truncated, available_width, SCALE1(BUTTON_PADDING * 2));
+    return MIN(max_width, prefix_width + text_width);
 }

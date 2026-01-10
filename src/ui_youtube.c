@@ -55,15 +55,12 @@ void render_youtube_menu(SDL_Surface* screen, int show_setting, int menu_selecte
 
         // Calculate text width for pill sizing
         int max_width = hw - SCALE1(PADDING * 2);
-        int text_width = GFX_truncateText(get_font_large(), youtube_menu_items[i], truncated, max_width, SCALE1(BUTTON_PADDING * 2));
-        int pill_width = MIN(max_width, text_width);
+        int pill_width = calc_list_pill_width(get_font_large(), youtube_menu_items[i], truncated, max_width, 0);
 
-        if (selected) {
-            SDL_Rect pill_rect = {SCALE1(PADDING), y, pill_width, SCALE1(PILL_SIZE)};
-            GFX_blitPill(ASSET_WHITE_PILL, screen, &pill_rect);
-        }
+        SDL_Rect pill_rect = {SCALE1(PADDING), y, pill_width, SCALE1(PILL_SIZE)};
+        draw_list_item_bg(screen, &pill_rect, selected);
 
-        SDL_Color text_color = selected ? COLOR_BLACK : COLOR_WHITE;
+        SDL_Color text_color = get_list_text_color(selected);
         int text_x = SCALE1(PADDING) + SCALE1(BUTTON_PADDING);
         SDL_Surface* text = TTF_RenderUTF8_Blended(get_font_large(), truncated, text_color);
         if (text) {
@@ -77,7 +74,7 @@ void render_youtube_menu(SDL_Surface* screen, int show_setting, int menu_selecte
             if (qcount > 0) {
                 char count_str[16];
                 snprintf(count_str, sizeof(count_str), "(%d)", qcount);
-                SDL_Surface* count_text = TTF_RenderUTF8_Blended(get_font_small(), count_str, selected ? COLOR_BLACK : COLOR_GRAY);
+                SDL_Surface* count_text = TTF_RenderUTF8_Blended(get_font_small(), count_str, selected ? uintToColour(THEME_COLOR5_255) : COLOR_GRAY);
                 if (count_text) {
                     SDL_BlitSurface(count_text, NULL, screen, &(SDL_Rect){hw - count_text->w - SCALE1(PADDING * 2), y + (SCALE1(PILL_SIZE) - count_text->h) / 2});
                     SDL_FreeSurface(count_text);
@@ -206,21 +203,18 @@ void render_youtube_results(SDL_Surface* screen, int show_setting,
 
         // Calculate text width for pill sizing
         char truncated[256];
-        int text_width = GFX_truncateText(get_font_large(), result->title, truncated, max_width - indicator_width, SCALE1(BUTTON_PADDING * 2));
-        int pill_width = MIN(max_width, indicator_width + text_width);
+        int pill_width = calc_list_pill_width(get_font_large(), result->title, truncated, max_width, indicator_width);
 
         // Background pill (sized to text width)
-        if (is_selected) {
-            SDL_Rect pill_rect = {SCALE1(PADDING), y, pill_width, item_h};
-            GFX_blitPill(ASSET_WHITE_PILL, screen, &pill_rect);
-        }
+        SDL_Rect pill_rect = {SCALE1(PADDING), y, pill_width, item_h};
+        draw_list_item_bg(screen, &pill_rect, is_selected);
 
         int title_x = SCALE1(PADDING) + SCALE1(BUTTON_PADDING);
         int text_y = y + (item_h - TTF_FontHeight(get_font_large())) / 2;
 
         // Show indicator if already in queue
         if (in_queue) {
-            SDL_Surface* indicator = TTF_RenderUTF8_Blended(get_font_tiny(), "[+]", is_selected ? COLOR_BLACK : COLOR_GRAY);
+            SDL_Surface* indicator = TTF_RenderUTF8_Blended(get_font_tiny(), "[+]", is_selected ? uintToColour(THEME_COLOR5_255) : COLOR_GRAY);
             if (indicator) {
                 SDL_BlitSurface(indicator, NULL, screen, &(SDL_Rect){title_x, y + (item_h - indicator->h) / 2});
                 title_x += indicator->w + SCALE1(4);
@@ -229,7 +223,7 @@ void render_youtube_results(SDL_Surface* screen, int show_setting,
         }
 
         // Title
-        SDL_Color text_color = is_selected ? COLOR_BLACK : COLOR_WHITE;
+        SDL_Color text_color = get_list_text_color(is_selected);
         int title_max_w = pill_width - SCALE1(BUTTON_PADDING * 2) - indicator_width;
 
         if (is_selected) {
@@ -380,21 +374,18 @@ void render_youtube_queue(SDL_Surface* screen, int show_setting,
 
         // Calculate text width for pill sizing
         char truncated[256];
-        int text_width = GFX_truncateText(get_font_large(), item->title, truncated, max_width - status_width, SCALE1(BUTTON_PADDING * 2));
-        int pill_width = MIN(max_width, status_width + text_width);
+        int pill_width = calc_list_pill_width(get_font_large(), item->title, truncated, max_width, status_width);
 
         // Background pill (sized to text width)
-        if (selected) {
-            SDL_Rect pill_rect = {SCALE1(PADDING), y, pill_width, item_h};
-            GFX_blitPill(ASSET_WHITE_PILL, screen, &pill_rect);
-        }
+        SDL_Rect pill_rect = {SCALE1(PADDING), y, pill_width, item_h};
+        draw_list_item_bg(screen, &pill_rect, selected);
 
         int title_x = SCALE1(PADDING) + SCALE1(BUTTON_PADDING);
         int text_y = y + (item_h - TTF_FontHeight(get_font_large())) / 2;
 
         // Render status indicator
         if (status_str) {
-            SDL_Surface* status_text = TTF_RenderUTF8_Blended(get_font_tiny(), status_str, selected ? COLOR_BLACK : status_color);
+            SDL_Surface* status_text = TTF_RenderUTF8_Blended(get_font_tiny(), status_str, selected ? uintToColour(THEME_COLOR5_255) : status_color);
             if (status_text) {
                 SDL_BlitSurface(status_text, NULL, screen, &(SDL_Rect){title_x, y + (item_h - status_text->h) / 2});
                 title_x += status_text->w + SCALE1(8);
@@ -403,7 +394,7 @@ void render_youtube_queue(SDL_Surface* screen, int show_setting,
         }
 
         // Title
-        SDL_Color text_color = selected ? COLOR_BLACK : COLOR_WHITE;
+        SDL_Color text_color = get_list_text_color(selected);
         int title_max_w = pill_width - SCALE1(BUTTON_PADDING * 2) - status_width;
 
         if (selected) {

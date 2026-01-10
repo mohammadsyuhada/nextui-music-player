@@ -62,17 +62,14 @@ void render_radio_list(SDL_Surface* screen, int show_setting,
 
         // Calculate text width for pill sizing
         char truncated[256];
-        int text_width = GFX_truncateText(get_font_large(), station->name, truncated, max_width, SCALE1(BUTTON_PADDING * 2));
-        int pill_width = MIN(max_width, text_width);
+        int pill_width = calc_list_pill_width(get_font_large(), station->name, truncated, max_width, 0);
 
         // Background pill (sized to text width)
-        if (selected) {
-            SDL_Rect pill_rect = {SCALE1(PADDING), y, pill_width, item_h};
-            GFX_blitPill(ASSET_WHITE_PILL, screen, &pill_rect);
-        }
+        SDL_Rect pill_rect = {SCALE1(PADDING), y, pill_width, item_h};
+        draw_list_item_bg(screen, &pill_rect, selected);
 
         // Station name
-        SDL_Color text_color = selected ? COLOR_BLACK : COLOR_WHITE;
+        SDL_Color text_color = get_list_text_color(selected);
         int text_x = SCALE1(PADDING) + SCALE1(BUTTON_PADDING);
         int text_y = y + (item_h - TTF_FontHeight(get_font_large())) / 2;
         SDL_Surface* name_text = TTF_RenderUTF8_Blended(get_font_large(), station->name, text_color);
@@ -429,17 +426,14 @@ void render_radio_add(SDL_Surface* screen, int show_setting,
 
         // Calculate text width for pill sizing
         char truncated[256];
-        int text_width = GFX_truncateText(get_font_large(), country->name, truncated, max_width, SCALE1(BUTTON_PADDING * 2));
-        int pill_width = MIN(max_width, text_width);
+        int pill_width = calc_list_pill_width(get_font_large(), country->name, truncated, max_width, 0);
 
         // Background pill (sized to text width)
-        if (selected) {
-            SDL_Rect pill_rect = {SCALE1(PADDING), y, pill_width, item_h};
-            GFX_blitPill(ASSET_WHITE_PILL, screen, &pill_rect);
-        }
+        SDL_Rect pill_rect = {SCALE1(PADDING), y, pill_width, item_h};
+        draw_list_item_bg(screen, &pill_rect, selected);
 
         // Country name
-        SDL_Color text_color = selected ? COLOR_BLACK : COLOR_WHITE;
+        SDL_Color text_color = get_list_text_color(selected);
         int text_x = SCALE1(PADDING) + SCALE1(BUTTON_PADDING);
         int text_y = y + (item_h - TTF_FontHeight(get_font_large())) / 2;
         SDL_Surface* name_text = TTF_RenderUTF8_Blended(get_font_large(), country->name, text_color);
@@ -570,13 +564,11 @@ void render_radio_add_stations(SDL_Surface* screen, int show_setting,
         int pill_width = MIN(max_width, cb_width + text_width + SCALE1(BUTTON_PADDING));
 
         // Background pill (sized to text width)
-        if (selected) {
-            SDL_Rect pill_rect = {SCALE1(PADDING), y, pill_width, item_h};
-            GFX_blitPill(ASSET_WHITE_PILL, screen, &pill_rect);
-        }
+        SDL_Rect pill_rect = {SCALE1(PADDING), y, pill_width, item_h};
+        draw_list_item_bg(screen, &pill_rect, selected);
 
         // Checkbox indicator
-        SDL_Color cb_color = selected ? COLOR_BLACK : COLOR_WHITE;
+        SDL_Color cb_color = get_list_text_color(selected);
         int text_x = SCALE1(PADDING) + SCALE1(BUTTON_PADDING);
         int text_y = y + (item_h - TTF_FontHeight(get_font_large())) / 2;
         SDL_Surface* cb_text = TTF_RenderUTF8_Blended(get_font_small(), checkbox, cb_color);
@@ -586,7 +578,7 @@ void render_radio_add_stations(SDL_Surface* screen, int show_setting,
         }
 
         // Station name
-        SDL_Color text_color = selected ? COLOR_BLACK : COLOR_WHITE;
+        SDL_Color text_color = get_list_text_color(selected);
         SDL_Surface* name_text = TTF_RenderUTF8_Blended(get_font_large(), station->name, text_color);
         if (name_text) {
             SDL_Rect src = {0, 0, name_text->w > name_max_width ? name_max_width : name_text->w, name_text->h};
