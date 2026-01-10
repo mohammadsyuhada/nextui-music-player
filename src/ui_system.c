@@ -1,10 +1,14 @@
 #include <stdio.h>
 #include <string.h>
 
+#include <SDL2/SDL_image.h>
+
 #include "defines.h"
 #include "api.h"
 #include "ui_system.h"
+#include "ui_fonts.h"
 #include "selfupdate.h"
+#include "qr_code_data.h"
 
 // Render the app update screen
 void render_app_updating(SDL_Surface* screen, int show_setting) {
@@ -36,19 +40,27 @@ void render_app_updating(SDL_Surface* screen, int show_setting) {
     // Version info: "v0.1.0 → v0.2.0"
     char ver_str[128];
     if (strlen(status->latest_version) > 0) {
-        snprintf(ver_str, sizeof(ver_str), "v%s  ->  %s", status->current_version, status->latest_version);
+        // Strip 'v' prefix if present for consistent formatting
+        const char* curr = status->current_version;
+        const char* latest = status->latest_version;
+        if (curr[0] == 'v' || curr[0] == 'V') curr++;
+        if (latest[0] == 'v' || latest[0] == 'V') latest++;
+        snprintf(ver_str, sizeof(ver_str), "v%s  ->  v%s", curr, latest);
     } else {
-        snprintf(ver_str, sizeof(ver_str), "v%s", status->current_version);
+        const char* curr = status->current_version;
+        if (curr[0] == 'v' || curr[0] == 'V') curr++;
+        snprintf(ver_str, sizeof(ver_str), "v%s", curr);
     }
+    int ver_y = SCALE1(PADDING * 3 + 35);
     SDL_Surface* ver_text = TTF_RenderUTF8_Blended(font.medium, ver_str, COLOR_GRAY);
     if (ver_text) {
-        SDL_BlitSurface(ver_text, NULL, screen, &(SDL_Rect){(hw - ver_text->w) / 2, SCALE1(PADDING * 3 + 35)});
+        SDL_BlitSurface(ver_text, NULL, screen, &(SDL_Rect){(hw - ver_text->w) / 2, ver_y});
         SDL_FreeSurface(ver_text);
     }
 
-    // Release notes area with word wrapping
-    int notes_y = hh / 2 - SCALE1(30);
-    int notes_max_lines = 4;
+    // Release notes area with word wrapping (positioned right below version info)
+    int notes_y = ver_y + SCALE1(30);
+    int notes_max_lines = 5;
     int line_height = SCALE1(18);
     int max_line_width = hw - SCALE1(PADDING * 6);
 
@@ -63,7 +75,7 @@ void render_app_updating(SDL_Surface* screen, int show_setting) {
             if (notes_copy[i] == '\n' || notes_copy[i] == '\r') notes_copy[i] = ' ';
         }
 
-        char wrapped_lines[4][128];
+        char wrapped_lines[5][128];
         int line_count = 0;
         char* src = notes_copy;
 
@@ -85,7 +97,7 @@ void render_app_updating(SDL_Surface* screen, int show_setting) {
 
                 // Check width
                 int text_w, text_h;
-                TTF_SizeUTF8(font.small, test_line, &text_w, &text_h);
+                TTF_SizeUTF8(get_font_small(), test_line, &text_w, &text_h);
                 if (text_w > max_line_width) {
                     // Line too long, break at last space or current position
                     if (last_space > 0) {
@@ -106,7 +118,7 @@ void render_app_updating(SDL_Surface* screen, int show_setting) {
         // Render wrapped lines
         for (int i = 0; i < line_count; i++) {
             if (strlen(wrapped_lines[i]) > 0) {
-                SDL_Surface* line_text = TTF_RenderUTF8_Blended(font.small, wrapped_lines[i], COLOR_WHITE);
+                SDL_Surface* line_text = TTF_RenderUTF8_Blended(get_font_small(), wrapped_lines[i], COLOR_WHITE);
                 if (line_text) {
                     SDL_BlitSurface(line_text, NULL, screen, &(SDL_Rect){(hw - line_text->w) / 2, notes_y + i * line_height});
                     SDL_FreeSurface(line_text);
@@ -198,57 +210,56 @@ void render_about(SDL_Surface* screen, int show_setting) {
         GFX_blitHardwareGroup(screen, show_setting);
     }
 
-    // App name
-    const char* app_name = "NextUI Music Player";
+    // App name with version
+    const char* version = SelfUpdate_getVersion();
+    const char* ver = version;
+    if (ver[0] == 'v' || ver[0] == 'V') ver++;
+    char app_name[128];
+    snprintf(app_name, sizeof(app_name), "Music Player (v%s)", ver);
     SDL_Surface* name_text = TTF_RenderUTF8_Blended(font.large, app_name, COLOR_WHITE);
     if (name_text) {
         SDL_BlitSurface(name_text, NULL, screen, &(SDL_Rect){(hw - name_text->w) / 2, SCALE1(PADDING * 3 + PILL_SIZE)});
         SDL_FreeSurface(name_text);
     }
 
-    // Version
-    char version_str[64];
-    snprintf(version_str, sizeof(version_str), "Version %s", SelfUpdate_getVersion());
-    SDL_Surface* ver_text = TTF_RenderUTF8_Blended(font.medium, version_str, COLOR_GRAY);
-    if (ver_text) {
-        SDL_BlitSurface(ver_text, NULL, screen, &(SDL_Rect){(hw - ver_text->w) / 2, SCALE1(PADDING * 3 + PILL_SIZE + 35)});
-        SDL_FreeSurface(ver_text);
+    // Tagline (2 lines) - directly below app title
+    int info_y = SCALE1(PADDING * 3 + PILL_SIZE + 30);
+    const char* tagline1 = "Your favorite tunes on the go,";
+    const char* tagline2 = "powered by your gaming handheld.";
+    SDL_Surface* tagline_text1 = TTF_RenderUTF8_Blended(get_font_small(), tagline1, COLOR_WHITE);
+    if (tagline_text1) {
+        SDL_BlitSurface(tagline_text1, NULL, screen, &(SDL_Rect){(hw - tagline_text1->w) / 2, info_y});
+        SDL_FreeSurface(tagline_text1);
+    }
+    SDL_Surface* tagline_text2 = TTF_RenderUTF8_Blended(get_font_small(), tagline2, COLOR_WHITE);
+    if (tagline_text2) {
+        SDL_BlitSurface(tagline_text2, NULL, screen, &(SDL_Rect){(hw - tagline_text2->w) / 2, info_y + SCALE1(18)});
+        SDL_FreeSurface(tagline_text2);
     }
 
-    // Description
-    int info_y = hh / 2 - SCALE1(30);
-    const char* desc_lines[] = {
-        "Local music playback",
-        "Internet radio streaming",
-        "YouTube music downloads",
-        NULL
-    };
-
-    for (int i = 0; desc_lines[i] != NULL; i++) {
-        SDL_Surface* line_text = TTF_RenderUTF8_Blended(font.small, desc_lines[i], COLOR_WHITE);
-        if (line_text) {
-            SDL_BlitSurface(line_text, NULL, screen, &(SDL_Rect){(hw - line_text->w) / 2, info_y + i * SCALE1(20)});
-            SDL_FreeSurface(line_text);
-        }
-    }
-
-    // GitHub URL
-    const char* github_url = "github.com/mohammadsyuhada/nextui-music-player";
-    SDL_Surface* url_text = TTF_RenderUTF8_Blended(font.tiny, github_url, COLOR_GRAY);
-    if (url_text) {
-        SDL_BlitSurface(url_text, NULL, screen, &(SDL_Rect){(hw - url_text->w) / 2, hh - SCALE1(PILL_SIZE + PADDING * 3) - url_text->h});
-        SDL_FreeSurface(url_text);
-    }
-
-    // Show update available message if there's an update
+    // Show update available message if there's an update (directly under tagline)
     const SelfUpdateStatus* status = SelfUpdate_getStatus();
     if (status->update_available) {
         char update_msg[128];
-        snprintf(update_msg, sizeof(update_msg), "Update available: %s", status->latest_version);
-        SDL_Surface* update_text = TTF_RenderUTF8_Blended(font.small, update_msg, (SDL_Color){100, 255, 100, 255});
+        snprintf(update_msg, sizeof(update_msg), "Update available: v%s", status->latest_version);
+        SDL_Surface* update_text = TTF_RenderUTF8_Blended(get_font_small(), update_msg, (SDL_Color){100, 255, 100, 255});
         if (update_text) {
-            SDL_BlitSurface(update_text, NULL, screen, &(SDL_Rect){(hw - update_text->w) / 2, hh - SCALE1(PILL_SIZE + PADDING * 5) - update_text->h});
+            SDL_BlitSurface(update_text, NULL, screen, &(SDL_Rect){(hw - update_text->w) / 2, info_y + SCALE1(36)});
             SDL_FreeSurface(update_text);
+        }
+    }
+
+    // GitHub QR Code
+    SDL_RWops* rw = SDL_RWFromConstMem(qr_code_png, qr_code_png_len);
+    if (rw) {
+        SDL_Surface* qr_surface = IMG_Load_RW(rw, 1);
+        if (qr_surface) {
+            // Scale QR code to fit nicely (target ~150x150 pixels)
+            int qr_size = SCALE1(75);
+            SDL_Rect src_rect = {0, 0, qr_surface->w, qr_surface->h};
+            SDL_Rect dst_rect = {(hw - qr_size) / 2, hh - SCALE1(PILL_SIZE + PADDING * 2) - qr_size, qr_size, qr_size};
+            SDL_BlitScaled(qr_surface, &src_rect, screen, &dst_rect);
+            SDL_FreeSurface(qr_surface);
         }
     }
 

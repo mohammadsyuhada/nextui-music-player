@@ -6,6 +6,7 @@
 #include <unistd.h>
 #include <pthread.h>
 #include <sys/stat.h>
+#include <dirent.h>
 #include <errno.h>
 #include <zip.h>
 
@@ -45,6 +46,50 @@ static int mkpath(const char* path, mode_t mode) {
         }
     }
     return mkdir(tmp, mode);
+}
+
+// Sync directories: copy all from src to dst, remove orphans in dst
+// This replaces all files and removes files that no longer exist in the update
+static int sync_directories(const char* src, const char* dst) {
+    char cmd[1024];
+    DIR* dir;
+    struct dirent* entry;
+
+    // First, copy all files from src to dst (overwriting existing)
+    snprintf(cmd, sizeof(cmd), "cp -rf \"%s\"/* \"%s\"/ 2>/dev/null", src, dst);
+    system(cmd);
+
+    // Now remove orphaned files in dst that don't exist in src
+    dir = opendir(dst);
+    if (!dir) return -1;
+
+    while ((entry = readdir(dir)) != NULL) {
+        // Skip . and ..
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
+            continue;
+        }
+
+        char src_path[600], dst_path[600];
+        snprintf(src_path, sizeof(src_path), "%s/%s", src, entry->d_name);
+        snprintf(dst_path, sizeof(dst_path), "%s/%s", dst, entry->d_name);
+
+        // If file/folder doesn't exist in src, remove it from dst
+        if (access(src_path, F_OK) != 0) {
+            if (entry->d_type == DT_DIR) {
+                snprintf(cmd, sizeof(cmd), "rm -rf \"%s\"", dst_path);
+            } else {
+                snprintf(cmd, sizeof(cmd), "rm -f \"%s\"", dst_path);
+            }
+            system(cmd);
+        }
+        // If both are directories, recursively sync them
+        else if (entry->d_type == DT_DIR) {
+            sync_directories(src_path, dst_path);
+        }
+    }
+
+    closedir(dir);
+    return 0;
 }
 
 // Extract ZIP file using libzip
@@ -512,73 +557,30 @@ static void* update_thread_func(void* arg) {
     strcpy(update_status.status_message, "Installing update...");
     update_status.progress_percent = 70;
 
-    // Backup current binary (Linux allows replacing a running binary)
-    char binary_path[600], binary_backup[600];
-    snprintf(binary_path, sizeof(binary_path), "%s/musicplayer.elf", pak_path);
-    snprintf(binary_backup, sizeof(binary_backup), "%s/musicplayer.elf.old", pak_path);
-    rename(binary_path, binary_backup);
-
-    // Copy new binary
-    char new_binary[600];
-    snprintf(new_binary, sizeof(new_binary), "%s/musicplayer.elf", update_root);
-    snprintf(cmd, sizeof(cmd), "cp \"%s\" \"%s\"", new_binary, binary_path);
-    if (system(cmd) != 0) {
-        // Restore backup
-        rename(binary_backup, binary_path);
-        strcpy(update_status.error_message, "Failed to install binary");
+    // Sync all files: copy everything from update, remove orphaned files
+    // This handles: musicplayer.elf, launch.sh, bins/, fonts/, stations/, state/, etc.
+    // Note: Linux allows replacing a running binary - it continues from memory
+    if (sync_directories(update_root, pak_path) != 0) {
+        strcpy(update_status.error_message, "Failed to install update");
         snprintf(cmd, sizeof(cmd), "rm -rf \"%s\"", temp_dir);
         system(cmd);
         update_status.state = SELFUPDATE_STATE_ERROR;
         update_running = false;
         return NULL;
     }
-    chmod(binary_path, 0755);
-
-    update_status.progress_percent = 80;
-
-    // Copy launch.sh
-    char launch_src[600], launch_dst[600];
-    snprintf(launch_src, sizeof(launch_src), "%s/launch.sh", update_root);
-    snprintf(launch_dst, sizeof(launch_dst), "%s/launch.sh", pak_path);
-    if (access(launch_src, F_OK) == 0) {
-        snprintf(cmd, sizeof(cmd), "cp \"%s\" \"%s\"", launch_src, launch_dst);
-        system(cmd);
-        chmod(launch_dst, 0755);
-    }
-
-    update_status.progress_percent = 85;
-
-    // Copy fonts (if present in update)
-    char fonts_src[600], fonts_dst[600];
-    snprintf(fonts_src, sizeof(fonts_src), "%s/fonts", update_root);
-    snprintf(fonts_dst, sizeof(fonts_dst), "%s/fonts", pak_path);
-    if (access(fonts_src, F_OK) == 0) {
-        snprintf(cmd, sizeof(cmd), "cp -r \"%s\"/* \"%s\"/ 2>/dev/null", fonts_src, fonts_dst);
-        system(cmd);
-    }
 
     update_status.progress_percent = 90;
 
-    // Copy bins (except yt-dlp if user has newer version)
-    char bins_src[600], bins_dst[600];
-    snprintf(bins_src, sizeof(bins_src), "%s/bins", update_root);
-    snprintf(bins_dst, sizeof(bins_dst), "%s/bins", pak_path);
-    if (access(bins_src, F_OK) == 0) {
-        // Copy all except yt-dlp (preserve user's potentially updated version)
-        snprintf(cmd, sizeof(cmd),
-            "for f in \"%s\"/*; do "
-            "  bn=$(basename \"$f\"); "
-            "  if [ \"$bn\" != \"yt-dlp\" ]; then "
-            "    cp \"$f\" \"%s/\" 2>/dev/null; "
-            "  fi; "
-            "done",
-            bins_src, bins_dst);
-        system(cmd);
-    }
+    // Ensure executables have correct permissions
+    char binary_path[600], launch_path[600];
+    snprintf(binary_path, sizeof(binary_path), "%s/musicplayer.elf", pak_path);
+    snprintf(launch_path, sizeof(launch_path), "%s/launch.sh", pak_path);
+    chmod(binary_path, 0755);
+    chmod(launch_path, 0755);
 
     update_status.progress_percent = 95;
 
-    // Update version file
+    // Update version file (in case state/ wasn't in the package or needs override)
     FILE* vf = fopen(version_file, "w");
     if (vf) {
         fprintf(vf, "%s\n", update_status.latest_version);
@@ -591,9 +593,6 @@ static void* update_thread_func(void* arg) {
     // Cleanup temp directory
     snprintf(cmd, sizeof(cmd), "rm -rf \"%s\"", temp_dir);
     system(cmd);
-
-    // Remove backup after successful update
-    unlink(binary_backup);
 
     update_status.progress_percent = 100;
     strcpy(update_status.status_message, "Update complete! Restart to apply.");
