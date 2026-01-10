@@ -7,6 +7,7 @@
 #include "ui_fonts.h"
 #include "ui_utils.h"
 #include "ui_album_art.h"
+#include "spectrum.h"
 
 // Scroll text state for browser list (selected item)
 static ScrollTextState browser_scroll = {0};
@@ -182,49 +183,14 @@ void render_playing(SDL_Surface* screen, int show_setting, BrowserContext* brows
         }
     }
 
-    // === WAVEFORM SECTION ===
-    // Position waveform lower to avoid overlap
-    int wave_y = hh - SCALE1(PADDING + BUTTON_SIZE + BUTTON_MARGIN + 90);
-    int wave_h = SCALE1(50);
-    int wave_x = SCALE1(PADDING);
-    int wave_w = hw - SCALE1(PADDING * 2);
+    // === SPECTRUM SECTION (GPU rendered) ===
+    int spec_y = hh - SCALE1(PADDING + BUTTON_SIZE + BUTTON_MARGIN + 90);
+    int spec_h = SCALE1(50);
+    int spec_x = SCALE1(PADDING);
+    int spec_w = hw - SCALE1(PADDING * 2);
 
-    const WaveformData* waveform = Player_getWaveform();
-    if (waveform && waveform->valid && waveform->bar_count > 0) {
-        int total_bars = waveform->bar_count;
-        float bar_width_f = (float)wave_w / total_bars;
-        int bar_gap = 1;
-        int bar_draw_w = (int)bar_width_f - bar_gap;
-        if (bar_draw_w < 1) bar_draw_w = 1;
-
-        int current_bar = (int)(progress * total_bars);
-        if (current_bar >= total_bars) current_bar = total_bars - 1;
-
-        // Draw waveform bars (centered vertically)
-        for (int i = 0; i < total_bars; i++) {
-            float amplitude = waveform->bars[i];
-            int bar_h = (int)(amplitude * wave_h * 0.85f);
-            if (bar_h < SCALE1(2)) bar_h = SCALE1(2);
-
-            int bar_x_pos = wave_x + (int)(i * bar_width_f);
-            int bar_y_pos = wave_y + (wave_h - bar_h) / 2;
-
-            uint32_t color = (i <= current_bar) ? RGB_WHITE : RGB_DARK_GRAY;
-            SDL_Rect bar_rect = {bar_x_pos, bar_y_pos, bar_draw_w, bar_h};
-            SDL_FillRect(screen, &bar_rect, color);
-        }
-    } else {
-        // Fallback progress bar (thin line when no waveform)
-        SDL_Rect bg = {wave_x, wave_y + wave_h / 2 - SCALE1(1), wave_w, SCALE1(2)};
-        SDL_FillRect(screen, &bg, RGB_DARK_GRAY);
-        if (duration > 0) {
-            int fill_w = (int)(progress * wave_w);
-            if (fill_w > 0) {
-                SDL_Rect fill = {wave_x, wave_y + wave_h / 2 - SCALE1(1), fill_w, SCALE1(2)};
-                SDL_FillRect(screen, &fill, RGB_WHITE);
-            }
-        }
-    }
+    // Set position for GPU rendering (actual rendering happens in main loop)
+    Spectrum_setPosition(spec_x, spec_y, spec_w, spec_h);
 
     // === BOTTOM BAR ===
     int bottom_y = hh - SCALE1(PADDING + BUTTON_SIZE + BUTTON_MARGIN + 35);

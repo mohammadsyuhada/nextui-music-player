@@ -15,6 +15,7 @@
 #include "utils.h"
 #include "config.h"
 #include "player.h"
+#include "spectrum.h"
 #include "radio.h"
 #include "radio_album_art.h"
 #include "youtube.h"
@@ -151,6 +152,7 @@ int main(int argc, char* argv[]) {
     // System volume is 0-20, software volume is 0.0-1.0
     Player_setVolume(GetVolume() / 20.0f);
 
+    Spectrum_init();
     Radio_init();
     YouTube_init();
 
@@ -406,6 +408,7 @@ int main(int argc, char* argv[]) {
                     Player_stop();
                     cleanup_album_art_background();  // Clear cached background when stopping
                     GFX_clearLayers(LAYER_SCROLLTEXT);  // Clear scroll layer when leaving
+                    PLAT_clearLayers(LAYER_SPECTRUM);   // Clear spectrum layer when leaving
                     app_state = STATE_BROWSER;
                     // Re-enable autosleep when leaving playing state
                     if (autosleep_disabled) {
@@ -529,6 +532,7 @@ int main(int argc, char* argv[]) {
                         // If no next track, go back to browser
                         if (!found_next && Player_getState() == PLAYER_STATE_STOPPED) {
                             GFX_clearLayers(LAYER_SCROLLTEXT);  // Clear scroll layer when leaving
+                            PLAT_clearLayers(LAYER_SPECTRUM);   // Clear spectrum layer when leaving
                             app_state = STATE_BROWSER;
                             if (autosleep_disabled) {
                                 PWR_enableAutosleep();
@@ -549,20 +553,17 @@ int main(int argc, char* argv[]) {
                         }
                     }
 
-                    // Periodic redraw for waveform/progress bar (every 100ms)
-                    // DISABLED FOR TESTING - uncomment when scroll is working
-                    // static uint32_t last_progress_update = 0;
-                    // uint32_t now_progress = SDL_GetTicks();
-                    // if (now_progress - last_progress_update >= 100) {
-                    //     dirty = 1;
-                    //     last_progress_update = now_progress;
-                    // }
                 }
             }
 
             // Animate player title scroll (GPU mode, no screen redraw needed)
             if (player_needs_scroll_refresh()) {
                 player_animate_scroll();
+            }
+
+            // Animate spectrum visualizer (GPU mode)
+            if (Spectrum_needsRefresh()) {
+                Spectrum_renderGPU();
             }
         }
         else if (app_state == STATE_RADIO_LIST) {
@@ -1107,6 +1108,7 @@ cleanup:
     YouTube_cleanup();
     Radio_quit();
     cleanup_album_art_background();  // Clean up cached background surface
+    Spectrum_quit();
     Player_quit();
     Browser_freeEntries(&browser);
     unload_custom_fonts();
