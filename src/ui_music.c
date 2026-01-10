@@ -7,11 +7,6 @@
 #include "ui_fonts.h"
 #include "ui_utils.h"
 #include "ui_album_art.h"
-#include "selfupdate.h"
-
-// Menu items
-static const char* menu_items[] = {"Local Files", "Internet Radio", "MP3 Downloader", "About"};
-#define MENU_ITEM_COUNT 4
 
 // Scroll text state for browser list (selected item)
 static ScrollTextState browser_scroll = {0};
@@ -27,45 +22,20 @@ void render_browser(SDL_Surface* screen, int show_setting, BrowserContext* brows
     int hh = screen->h;
     char truncated[256];
 
-    // Title pill
-    const char* title = "Music Player";
-    int title_width = GFX_truncateText(get_font_medium(), title, truncated, hw - SCALE1(PADDING * 4), SCALE1(BUTTON_PADDING * 2));
-    GFX_blitPill(ASSET_BLACK_PILL, screen, &(SDL_Rect){SCALE1(PADDING), SCALE1(PADDING), title_width, SCALE1(PILL_SIZE)});
+    render_screen_header(screen, "Music Player", show_setting);
 
-    SDL_Surface* title_text = TTF_RenderUTF8_Blended(get_font_medium(), truncated, COLOR_GRAY);
-    if (title_text) {
-        SDL_BlitSurface(title_text, NULL, screen, &(SDL_Rect){SCALE1(PADDING) + SCALE1(BUTTON_PADDING), SCALE1(PADDING + 4)});
-        SDL_FreeSurface(title_text);
-    }
+    // Use common list layout calculation
+    ListLayout layout = calc_list_layout(screen, 0);
+    browser->items_per_page = layout.items_per_page;
 
-    // Hardware status
-    if (hw >= SCALE1(320)) {
-        GFX_blitHardwareGroup(screen, show_setting);
-    }
-
-    // File list
-    int list_y = SCALE1(PADDING + PILL_SIZE + BUTTON_MARGIN);
-    int list_h = hh - list_y - SCALE1(PADDING + BUTTON_SIZE + BUTTON_MARGIN);
-    int item_h = SCALE1(PILL_SIZE);
-    browser->items_per_page = list_h / item_h;
-
-    // Adjust scroll
-    if (browser->selected < browser->scroll_offset) {
-        browser->scroll_offset = browser->selected;
-    }
-    if (browser->selected >= browser->scroll_offset + browser->items_per_page) {
-        browser->scroll_offset = browser->selected - browser->items_per_page + 1;
-    }
-
-    // Render items
-    int max_width = hw - SCALE1(PADDING * 4);
+    adjust_list_scroll(browser->selected, &browser->scroll_offset, browser->items_per_page);
 
     for (int i = 0; i < browser->items_per_page && browser->scroll_offset + i < browser->entry_count; i++) {
         int idx = browser->scroll_offset + i;
         FileEntry* entry = &browser->entries[idx];
         bool selected = (idx == browser->selected);
 
-        int y = list_y + i * item_h;
+        int y = layout.list_y + i * layout.item_h;
 
         // Icon or folder indicator
         char display[256];
@@ -75,43 +45,15 @@ void render_browser(SDL_Surface* screen, int show_setting, BrowserContext* brows
             Browser_getDisplayName(entry->name, display, sizeof(display));
         }
 
-        // Calculate text width for pill sizing
-        char truncated[256];
-        int pill_width = calc_list_pill_width(get_font_large(), display, truncated, max_width, 0);
+        // Render pill background and get text position
+        ListItemPos pos = render_list_item_pill(screen, &layout, display, truncated, y, selected, 0);
 
-        // Background pill (sized to text width)
-        SDL_Rect pill_rect = {SCALE1(PADDING), y, pill_width, item_h};
-        draw_list_item_bg(screen, &pill_rect, selected);
-
-        SDL_Color text_color = get_list_text_color(selected);
-        int text_x = SCALE1(PADDING) + SCALE1(BUTTON_PADDING);
-        int text_y = y + (item_h - TTF_FontHeight(get_font_large())) / 2;
-
-        if (selected) {
-            // Selected item: use scrolling text
-            ScrollText_update(&browser_scroll, display, get_font_large(), pill_width - SCALE1(BUTTON_PADDING * 2),
-                              text_color, screen, text_x, text_y);
-        } else {
-            // Non-selected items: static rendering with clipping
-            SDL_Surface* text = TTF_RenderUTF8_Blended(get_font_large(), display, text_color);
-            if (text) {
-                SDL_Rect src = {0, 0, text->w > max_width ? max_width : text->w, text->h};
-                SDL_BlitSurface(text, &src, screen, &(SDL_Rect){text_x, text_y, 0, 0});
-                SDL_FreeSurface(text);
-            }
-        }
+        // Use common text rendering with scrolling for selected items
+        render_list_item_text(screen, &browser_scroll, display, get_font_medium(),
+                              pos.text_x, pos.text_y, pos.pill_width - SCALE1(BUTTON_PADDING * 2), selected);
     }
 
-    // Scroll indicators
-    if (browser->entry_count > browser->items_per_page) {
-        int ox = (hw - SCALE1(24)) / 2;
-        if (browser->scroll_offset > 0) {
-            GFX_blitAsset(ASSET_SCROLL_UP, NULL, screen, &(SDL_Rect){ox, SCALE1(PADDING + PILL_SIZE)});
-        }
-        if (browser->scroll_offset + browser->items_per_page < browser->entry_count) {
-            GFX_blitAsset(ASSET_SCROLL_DOWN, NULL, screen, &(SDL_Rect){ox, hh - SCALE1(PADDING + PILL_SIZE + BUTTON_SIZE)});
-        }
-    }
+    render_scroll_indicators(screen, browser->scroll_offset, browser->items_per_page, browser->entry_count);
 
     // Empty folder message
     if (browser->entry_count == 0) {
@@ -327,124 +269,7 @@ void render_playing(SDL_Surface* screen, int show_setting, BrowserContext* brows
     GFX_blitButtonGroup((char*[]){"B", "BACK", "A", state == PLAYER_STATE_PLAYING ? "PAUSE" : "PLAY", NULL}, 1, screen, 1);
 }
 
-// Render quit confirmation dialog overlay
-void render_quit_confirm(SDL_Surface* screen) {
-    int hw = screen->w;
-    int hh = screen->h;
-
-    // Dialog box (centered)
-    int box_w = SCALE1(220);
-    int box_h = SCALE1(90);
-    int box_x = (hw - box_w) / 2;
-    int box_y = (hh - box_h) / 2;
-
-    // Dark background around dialog
-    SDL_Rect top_area = {0, 0, hw, box_y};
-    SDL_Rect bot_area = {0, box_y + box_h, hw, hh - box_y - box_h};
-    SDL_Rect left_area = {0, box_y, box_x, box_h};
-    SDL_Rect right_area = {box_x + box_w, box_y, hw - box_x - box_w, box_h};
-    SDL_FillRect(screen, &top_area, RGB_BLACK);
-    SDL_FillRect(screen, &bot_area, RGB_BLACK);
-    SDL_FillRect(screen, &left_area, RGB_BLACK);
-    SDL_FillRect(screen, &right_area, RGB_BLACK);
-
-    // Box background
-    SDL_Rect box = {box_x, box_y, box_w, box_h};
-    SDL_FillRect(screen, &box, RGB_BLACK);
-
-    // Box border
-    SDL_Rect border_top = {box_x, box_y, box_w, SCALE1(2)};
-    SDL_Rect border_bot = {box_x, box_y + box_h - SCALE1(2), box_w, SCALE1(2)};
-    SDL_Rect border_left = {box_x, box_y, SCALE1(2), box_h};
-    SDL_Rect border_right = {box_x + box_w - SCALE1(2), box_y, SCALE1(2), box_h};
-    SDL_FillRect(screen, &border_top, RGB_WHITE);
-    SDL_FillRect(screen, &border_bot, RGB_WHITE);
-    SDL_FillRect(screen, &border_left, RGB_WHITE);
-    SDL_FillRect(screen, &border_right, RGB_WHITE);
-
-    // Message text
-    const char* msg = "Quit Music Player?";
-    SDL_Surface* msg_surf = TTF_RenderUTF8_Blended(get_font_medium(), msg, COLOR_WHITE);
-    if (msg_surf) {
-        SDL_BlitSurface(msg_surf, NULL, screen, &(SDL_Rect){(hw - msg_surf->w) / 2, box_y + SCALE1(20)});
-        SDL_FreeSurface(msg_surf);
-    }
-
-    // Button hints
-    const char* hint = "A: Yes   B: No";
-    SDL_Surface* hint_surf = TTF_RenderUTF8_Blended(get_font_small(), hint, COLOR_GRAY);
-    if (hint_surf) {
-        SDL_BlitSurface(hint_surf, NULL, screen, &(SDL_Rect){(hw - hint_surf->w) / 2, box_y + SCALE1(55)});
-        SDL_FreeSurface(hint_surf);
-    }
-}
-
 // Check if browser list has active scrolling (for refresh optimization)
 bool browser_needs_scroll_refresh(void) {
     return ScrollText_isScrolling(&browser_scroll);
-}
-
-// Render the main menu
-void render_menu(SDL_Surface* screen, int show_setting, int menu_selected) {
-    GFX_clear(screen);
-
-    int hw = screen->w;
-    int hh = screen->h;
-    (void)hh;  // Unused in this function
-    char truncated[256];
-
-    // Title
-    const char* title = "Music Player";
-    int title_width = GFX_truncateText(get_font_medium(), title, truncated, hw - SCALE1(PADDING * 4), SCALE1(BUTTON_PADDING * 2));
-    GFX_blitPill(ASSET_BLACK_PILL, screen, &(SDL_Rect){SCALE1(PADDING), SCALE1(PADDING), title_width, SCALE1(PILL_SIZE)});
-
-    SDL_Surface* title_text = TTF_RenderUTF8_Blended(get_font_medium(), truncated, COLOR_GRAY);
-    if (title_text) {
-        SDL_BlitSurface(title_text, NULL, screen, &(SDL_Rect){SCALE1(PADDING) + SCALE1(BUTTON_PADDING), SCALE1(PADDING + 4)});
-        SDL_FreeSurface(title_text);
-    }
-
-    // Hardware status
-    if (hw >= SCALE1(320)) {
-        GFX_blitHardwareGroup(screen, show_setting);
-    }
-
-    // Menu items
-    int list_y = SCALE1(PADDING + PILL_SIZE + BUTTON_MARGIN);
-    int item_h = SCALE1(PILL_SIZE + BUTTON_MARGIN);
-
-    for (int i = 0; i < MENU_ITEM_COUNT; i++) {
-        int y = list_y + i * item_h;
-        bool selected = (i == menu_selected);
-
-        // Dynamic label for About menu item (show update badge if available)
-        const char* label = menu_items[i];
-        char about_label[64];
-        if (i == 3) {  // About menu item
-            const SelfUpdateStatus* status = SelfUpdate_getStatus();
-            if (status->update_available) {
-                snprintf(about_label, sizeof(about_label), "About (Update Available)");
-                label = about_label;
-            }
-        }
-
-        // Calculate text width for pill sizing
-        int max_width = hw - SCALE1(PADDING * 2);
-        int pill_width = calc_list_pill_width(get_font_large(), label, truncated, max_width, 0);
-
-        SDL_Rect pill_rect = {SCALE1(PADDING), y, pill_width, SCALE1(PILL_SIZE)};
-        draw_list_item_bg(screen, &pill_rect, selected);
-
-        SDL_Color text_color = get_list_text_color(selected);
-        int text_x = SCALE1(PADDING) + SCALE1(BUTTON_PADDING);
-        SDL_Surface* text = TTF_RenderUTF8_Blended(get_font_large(), truncated, text_color);
-        if (text) {
-            SDL_BlitSurface(text, NULL, screen, &(SDL_Rect){text_x, y + (SCALE1(PILL_SIZE) - text->h) / 2});
-            SDL_FreeSurface(text);
-        }
-    }
-
-    // Button hints
-    GFX_blitButtonGroup((char*[]){"U/D", "SELECT", NULL}, 0, screen, 0);
-    GFX_blitButtonGroup((char*[]){"B", "EXIT", "A", "OPEN", NULL}, 1, screen, 1);
 }

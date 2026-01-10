@@ -20,72 +20,30 @@ static const char* youtube_menu_items[] = {"Search Music", "Download Queue", "Up
 // Toast duration constant
 #define YOUTUBE_TOAST_DURATION 1500  // 1.5 seconds
 
+// Label callback for queue count on Download Queue menu item
+static const char* youtube_menu_get_label(int index, const char* default_label,
+                                          char* buffer, int buffer_size) {
+    if (index == 1) {  // Download Queue
+        int qcount = YouTube_queueCount();
+        if (qcount > 0) {
+            snprintf(buffer, buffer_size, "Download Queue (%d)", qcount);
+            return buffer;
+        }
+    }
+    return NULL;  // Use default label
+}
+
 // Render YouTube sub-menu
 void render_youtube_menu(SDL_Surface* screen, int show_setting, int menu_selected) {
-    GFX_clear(screen);
-
-    int hw = screen->w;
-    int hh = screen->h;
-    (void)hh;
-    char truncated[256];
-
-    // Title
-    const char* title = "MP3 Downloader";
-    int title_width = GFX_truncateText(get_font_medium(), title, truncated, hw - SCALE1(PADDING * 4), SCALE1(BUTTON_PADDING * 2));
-    GFX_blitPill(ASSET_BLACK_PILL, screen, &(SDL_Rect){SCALE1(PADDING), SCALE1(PADDING), title_width, SCALE1(PILL_SIZE)});
-
-    SDL_Surface* title_text = TTF_RenderUTF8_Blended(get_font_medium(), truncated, COLOR_GRAY);
-    if (title_text) {
-        SDL_BlitSurface(title_text, NULL, screen, &(SDL_Rect){SCALE1(PADDING) + SCALE1(BUTTON_PADDING), SCALE1(PADDING + 4)});
-        SDL_FreeSurface(title_text);
-    }
-
-    // Hardware status
-    if (hw >= SCALE1(320)) {
-        GFX_blitHardwareGroup(screen, show_setting);
-    }
-
-    // Menu items
-    int list_y = SCALE1(PADDING + PILL_SIZE + BUTTON_MARGIN);
-    int item_h = SCALE1(PILL_SIZE + BUTTON_MARGIN);
-
-    for (int i = 0; i < YOUTUBE_MENU_COUNT; i++) {
-        int y = list_y + i * item_h;
-        bool selected = (i == menu_selected);
-
-        // Calculate text width for pill sizing
-        int max_width = hw - SCALE1(PADDING * 2);
-        int pill_width = calc_list_pill_width(get_font_large(), youtube_menu_items[i], truncated, max_width, 0);
-
-        SDL_Rect pill_rect = {SCALE1(PADDING), y, pill_width, SCALE1(PILL_SIZE)};
-        draw_list_item_bg(screen, &pill_rect, selected);
-
-        SDL_Color text_color = get_list_text_color(selected);
-        int text_x = SCALE1(PADDING) + SCALE1(BUTTON_PADDING);
-        SDL_Surface* text = TTF_RenderUTF8_Blended(get_font_large(), truncated, text_color);
-        if (text) {
-            SDL_BlitSurface(text, NULL, screen, &(SDL_Rect){text_x, y + (SCALE1(PILL_SIZE) - text->h) / 2});
-            SDL_FreeSurface(text);
-        }
-
-        // Show queue count next to Download Queue
-        if (i == 1) {
-            int qcount = YouTube_queueCount();
-            if (qcount > 0) {
-                char count_str[16];
-                snprintf(count_str, sizeof(count_str), "(%d)", qcount);
-                SDL_Surface* count_text = TTF_RenderUTF8_Blended(get_font_small(), count_str, selected ? uintToColour(THEME_COLOR5_255) : COLOR_GRAY);
-                if (count_text) {
-                    SDL_BlitSurface(count_text, NULL, screen, &(SDL_Rect){hw - count_text->w - SCALE1(PADDING * 2), y + (SCALE1(PILL_SIZE) - count_text->h) / 2});
-                    SDL_FreeSurface(count_text);
-                }
-            }
-        }
-    }
-
-    // Button hints
-    GFX_blitButtonGroup((char*[]){"U/D", "SELECT", NULL}, 0, screen, 0);
-    GFX_blitButtonGroup((char*[]){ "B", "BACK", "A", "OPEN", NULL}, 1, screen, 1);
+    SimpleMenuConfig config = {
+        .title = "MP3 Downloader",
+        .items = youtube_menu_items,
+        .item_count = YOUTUBE_MENU_COUNT,
+        .btn_b_label = "BACK",
+        .get_label = youtube_menu_get_label,
+        .render_badge = NULL
+    };
+    render_simple_menu(screen, show_setting, menu_selected, &config);
 }
 
 // Render YouTube searching status
@@ -94,23 +52,8 @@ void render_youtube_searching(SDL_Surface* screen, int show_setting, const char*
 
     int hw = screen->w;
     int hh = screen->h;
-    char truncated[256];
 
-    // Title
-    const char* title = "Searching...";
-    int title_width = GFX_truncateText(get_font_medium(), title, truncated, hw - SCALE1(PADDING * 4), SCALE1(BUTTON_PADDING * 2));
-    GFX_blitPill(ASSET_BLACK_PILL, screen, &(SDL_Rect){SCALE1(PADDING), SCALE1(PADDING), title_width, SCALE1(PILL_SIZE)});
-
-    SDL_Surface* title_text = TTF_RenderUTF8_Blended(get_font_medium(), truncated, COLOR_GRAY);
-    if (title_text) {
-        SDL_BlitSurface(title_text, NULL, screen, &(SDL_Rect){SCALE1(PADDING) + SCALE1(BUTTON_PADDING), SCALE1(PADDING + 4)});
-        SDL_FreeSurface(title_text);
-    }
-
-    // Hardware status
-    if (hw >= SCALE1(320)) {
-        GFX_blitHardwareGroup(screen, show_setting);
-    }
+    render_screen_header(screen, "Searching...", show_setting);
 
     // Searching message
     char search_msg[300];
@@ -130,8 +73,6 @@ void render_youtube_searching(SDL_Surface* screen, int show_setting, const char*
         SDL_BlitSurface(load_text, NULL, screen, &(SDL_Rect){(hw - load_text->w) / 2, hh / 2 + SCALE1(10)});
         SDL_FreeSurface(load_text);
     }
-
-    // No button hints during search - it's blocking
 }
 
 // Render YouTube search results
@@ -146,52 +87,32 @@ void render_youtube_results(SDL_Surface* screen, int show_setting,
     int hh = screen->h;
     char truncated[256];
 
-    // Title
+    // Title with search query
     char title[128];
     snprintf(title, sizeof(title), "Results: %s", search_query);
-    int title_width = GFX_truncateText(get_font_medium(), title, truncated, hw - SCALE1(PADDING * 4), SCALE1(BUTTON_PADDING * 2));
-    GFX_blitPill(ASSET_BLACK_PILL, screen, &(SDL_Rect){SCALE1(PADDING), SCALE1(PADDING), title_width, SCALE1(PILL_SIZE)});
+    render_screen_header(screen, title, show_setting);
 
-    SDL_Surface* title_text = TTF_RenderUTF8_Blended(get_font_medium(), truncated, COLOR_GRAY);
-    if (title_text) {
-        SDL_BlitSurface(title_text, NULL, screen, &(SDL_Rect){SCALE1(PADDING) + SCALE1(BUTTON_PADDING), SCALE1(PADDING + 4)});
-        SDL_FreeSurface(title_text);
-    }
-
-    // Hardware status
-    if (hw >= SCALE1(320)) {
-        GFX_blitHardwareGroup(screen, show_setting);
-    }
-
-    // Results list
-    int list_y = SCALE1(PADDING + PILL_SIZE + BUTTON_MARGIN);
-    int list_h = hh - list_y - SCALE1(PADDING + BUTTON_SIZE + BUTTON_MARGIN);
-    int item_h = SCALE1(PILL_SIZE);
-    int items_per_page = list_h / item_h;
+    // Use common list layout calculation
+    ListLayout layout = calc_list_layout(screen, 0);
 
     // Adjust scroll (only if there's a selection)
     if (selected >= 0) {
-        if (selected < *scroll) {
-            *scroll = selected;
-        }
-        if (selected >= *scroll + items_per_page) {
-            *scroll = selected - items_per_page + 1;
-        }
+        adjust_list_scroll(selected, scroll, layout.items_per_page);
     }
 
     // Reserve space for duration on the right (format: "99:59" max)
     int dur_w, dur_h;
     TTF_SizeUTF8(get_font_tiny(), "99:59", &dur_w, &dur_h);
     int duration_reserved = dur_w + SCALE1(PADDING * 2);  // Duration width + gap
-    int max_width = hw - SCALE1(PADDING * 2) - duration_reserved;
+    int max_width = layout.max_width - duration_reserved;
 
-    for (int i = 0; i < items_per_page && *scroll + i < result_count; i++) {
+    for (int i = 0; i < layout.items_per_page && *scroll + i < result_count; i++) {
         int idx = *scroll + i;
         YouTubeResult* result = &results[idx];
         bool is_selected = (idx == selected);
         bool in_queue = YouTube_isInQueue(result->video_id);
 
-        int y = list_y + i * item_h;
+        int y = layout.list_y + i * layout.item_h;
 
         // Calculate indicator width if in queue
         int indicator_width = 0;
@@ -202,43 +123,29 @@ void render_youtube_results(SDL_Surface* screen, int show_setting,
         }
 
         // Calculate text width for pill sizing
-        char truncated[256];
-        int pill_width = calc_list_pill_width(get_font_large(), result->title, truncated, max_width, indicator_width);
+        int pill_width = calc_list_pill_width(get_font_medium(), result->title, truncated, max_width, indicator_width);
 
         // Background pill (sized to text width)
-        SDL_Rect pill_rect = {SCALE1(PADDING), y, pill_width, item_h};
+        SDL_Rect pill_rect = {SCALE1(PADDING), y, pill_width, layout.item_h};
         draw_list_item_bg(screen, &pill_rect, is_selected);
 
         int title_x = SCALE1(PADDING) + SCALE1(BUTTON_PADDING);
-        int text_y = y + (item_h - TTF_FontHeight(get_font_large())) / 2;
+        int text_y = y + (layout.item_h - TTF_FontHeight(get_font_medium())) / 2;
 
         // Show indicator if already in queue
         if (in_queue) {
             SDL_Surface* indicator = TTF_RenderUTF8_Blended(get_font_tiny(), "[+]", is_selected ? uintToColour(THEME_COLOR5_255) : COLOR_GRAY);
             if (indicator) {
-                SDL_BlitSurface(indicator, NULL, screen, &(SDL_Rect){title_x, y + (item_h - indicator->h) / 2});
+                SDL_BlitSurface(indicator, NULL, screen, &(SDL_Rect){title_x, y + (layout.item_h - indicator->h) / 2});
                 title_x += indicator->w + SCALE1(4);
                 SDL_FreeSurface(indicator);
             }
         }
 
-        // Title
-        SDL_Color text_color = get_list_text_color(is_selected);
+        // Title - use common text rendering with scrolling for selected items
         int title_max_w = pill_width - SCALE1(BUTTON_PADDING * 2) - indicator_width;
-
-        if (is_selected) {
-            // Selected item: use scrolling text
-            ScrollText_update(&youtube_results_scroll_text, result->title, get_font_large(), title_max_w,
-                              text_color, screen, title_x, text_y);
-        } else {
-            // Non-selected items: static rendering with clipping
-            SDL_Surface* text = TTF_RenderUTF8_Blended(get_font_large(), result->title, text_color);
-            if (text) {
-                SDL_Rect src = {0, 0, text->w > title_max_w ? title_max_w : text->w, text->h};
-                SDL_BlitSurface(text, &src, screen, &(SDL_Rect){title_x, text_y, 0, 0});
-                SDL_FreeSurface(text);
-            }
-        }
+        render_list_item_text(screen, &youtube_results_scroll_text, result->title, get_font_medium(),
+                              title_x, text_y, title_max_w, is_selected);
 
         // Duration (always on right, outside pill)
         if (result->duration_sec > 0) {
@@ -246,9 +153,9 @@ void render_youtube_results(SDL_Surface* screen, int show_setting,
             int m = result->duration_sec / 60;
             int s = result->duration_sec % 60;
             snprintf(dur, sizeof(dur), "%d:%02d", m, s);
-            SDL_Surface* dur_text = TTF_RenderUTF8_Blended(get_font_tiny(), dur, is_selected ? COLOR_GRAY : COLOR_GRAY);
+            SDL_Surface* dur_text = TTF_RenderUTF8_Blended(get_font_tiny(), dur, COLOR_GRAY);
             if (dur_text) {
-                SDL_BlitSurface(dur_text, NULL, screen, &(SDL_Rect){hw - dur_text->w - SCALE1(PADDING * 2), y + (item_h - dur_text->h) / 2});
+                SDL_BlitSurface(dur_text, NULL, screen, &(SDL_Rect){hw - dur_text->w - SCALE1(PADDING * 2), y + (layout.item_h - dur_text->h) / 2});
                 SDL_FreeSurface(dur_text);
             }
         }
@@ -312,47 +219,22 @@ void render_youtube_queue(SDL_Surface* screen, int show_setting,
     int hh = screen->h;
     char truncated[256];
 
-    // Title
-    const char* title = "Download Queue";
-    int title_width = GFX_truncateText(get_font_medium(), title, truncated, hw - SCALE1(PADDING * 4), SCALE1(BUTTON_PADDING * 2));
-    GFX_blitPill(ASSET_BLACK_PILL, screen, &(SDL_Rect){SCALE1(PADDING), SCALE1(PADDING), title_width, SCALE1(PILL_SIZE)});
-
-    SDL_Surface* title_text = TTF_RenderUTF8_Blended(get_font_medium(), truncated, COLOR_GRAY);
-    if (title_text) {
-        SDL_BlitSurface(title_text, NULL, screen, &(SDL_Rect){SCALE1(PADDING) + SCALE1(BUTTON_PADDING), SCALE1(PADDING + 4)});
-        SDL_FreeSurface(title_text);
-    }
-
-    // Hardware status
-    if (hw >= SCALE1(320)) {
-        GFX_blitHardwareGroup(screen, show_setting);
-    }
+    render_screen_header(screen, "Download Queue", show_setting);
 
     // Queue list
     int qcount = 0;
     YouTubeQueueItem* queue = YouTube_queueGet(&qcount);
 
-    int list_y = SCALE1(PADDING + PILL_SIZE + BUTTON_MARGIN);
-    int list_h = hh - list_y - SCALE1(PADDING + BUTTON_SIZE + BUTTON_MARGIN);
-    int item_h = SCALE1(PILL_SIZE);
-    int items_per_page = list_h / item_h;
+    // Use common list layout calculation
+    ListLayout layout = calc_list_layout(screen, 0);
+    adjust_list_scroll(queue_selected, queue_scroll, layout.items_per_page);
 
-    // Adjust scroll
-    if (queue_selected < *queue_scroll) {
-        *queue_scroll = queue_selected;
-    }
-    if (queue_selected >= *queue_scroll + items_per_page) {
-        *queue_scroll = queue_selected - items_per_page + 1;
-    }
-
-    int max_width = hw - SCALE1(PADDING * 4);
-
-    for (int i = 0; i < items_per_page && *queue_scroll + i < qcount; i++) {
+    for (int i = 0; i < layout.items_per_page && *queue_scroll + i < qcount; i++) {
         int idx = *queue_scroll + i;
         YouTubeQueueItem* item = &queue[idx];
         bool selected = (idx == queue_selected);
 
-        int y = list_y + i * item_h;
+        int y = layout.list_y + i * layout.item_h;
 
         // Status indicator (only for non-pending items)
         const char* status_str = NULL;
@@ -372,51 +254,31 @@ void render_youtube_queue(SDL_Surface* screen, int show_setting,
             status_width = st_w + SCALE1(8);
         }
 
-        // Calculate text width for pill sizing
-        char truncated[256];
-        int pill_width = calc_list_pill_width(get_font_large(), item->title, truncated, max_width, status_width);
-
-        // Background pill (sized to text width)
-        SDL_Rect pill_rect = {SCALE1(PADDING), y, pill_width, item_h};
-        draw_list_item_bg(screen, &pill_rect, selected);
-
-        int title_x = SCALE1(PADDING) + SCALE1(BUTTON_PADDING);
-        int text_y = y + (item_h - TTF_FontHeight(get_font_large())) / 2;
+        // Render pill background and get text position
+        ListItemPos pos = render_list_item_pill(screen, &layout, item->title, truncated, y, selected, status_width);
+        int title_x = pos.text_x;
 
         // Render status indicator
         if (status_str) {
             SDL_Surface* status_text = TTF_RenderUTF8_Blended(get_font_tiny(), status_str, selected ? uintToColour(THEME_COLOR5_255) : status_color);
             if (status_text) {
-                SDL_BlitSurface(status_text, NULL, screen, &(SDL_Rect){title_x, y + (item_h - status_text->h) / 2});
+                SDL_BlitSurface(status_text, NULL, screen, &(SDL_Rect){title_x, y + (layout.item_h - status_text->h) / 2});
                 title_x += status_text->w + SCALE1(8);
                 SDL_FreeSurface(status_text);
             }
         }
 
-        // Title
-        SDL_Color text_color = get_list_text_color(selected);
-        int title_max_w = pill_width - SCALE1(BUTTON_PADDING * 2) - status_width;
-
-        if (selected) {
-            // Selected item: use scrolling text
-            ScrollText_update(&youtube_queue_scroll_text, item->title, get_font_large(), title_max_w,
-                              text_color, screen, title_x, text_y);
-        } else {
-            // Non-selected items: static rendering with clipping
-            SDL_Surface* text = TTF_RenderUTF8_Blended(get_font_large(), item->title, text_color);
-            if (text) {
-                SDL_Rect src = {0, 0, text->w > title_max_w ? title_max_w : text->w, text->h};
-                SDL_BlitSurface(text, &src, screen, &(SDL_Rect){title_x, text_y, 0, 0});
-                SDL_FreeSurface(text);
-            }
-        }
+        // Title - use common text rendering with scrolling for selected items
+        int title_max_w = pos.pill_width - SCALE1(BUTTON_PADDING * 2) - status_width;
+        render_list_item_text(screen, &youtube_queue_scroll_text, item->title, get_font_medium(),
+                              title_x, pos.text_y, title_max_w, selected);
 
         // Progress bar for downloading items (always on right, outside pill)
         if (item->status == YOUTUBE_STATUS_DOWNLOADING) {
             int bar_w = SCALE1(60);
             int bar_h = SCALE1(8);
             int bar_x = hw - SCALE1(PADDING * 2) - bar_w;
-            int bar_y = y + (item_h - bar_h) / 2;
+            int bar_y = y + (layout.item_h - bar_h) / 2;
 
             // Background bar
             SDL_Rect bg_rect = {bar_x, bar_y, bar_w, bar_h};
@@ -434,7 +296,7 @@ void render_youtube_queue(SDL_Surface* screen, int show_setting,
             snprintf(pct_str, sizeof(pct_str), "%d%%", item->progress_percent);
             SDL_Surface* pct_text = TTF_RenderUTF8_Blended(get_font_tiny(), pct_str, COLOR_GRAY);
             if (pct_text) {
-                SDL_BlitSurface(pct_text, NULL, screen, &(SDL_Rect){bar_x - pct_text->w - SCALE1(4), y + (item_h - pct_text->h) / 2});
+                SDL_BlitSurface(pct_text, NULL, screen, &(SDL_Rect){bar_x - pct_text->w - SCALE1(4), y + (layout.item_h - pct_text->h) / 2});
                 SDL_FreeSurface(pct_text);
             }
         }
@@ -467,21 +329,7 @@ void render_youtube_downloading(SDL_Surface* screen, int show_setting) {
     int hh = screen->h;
     char truncated[256];
 
-    // Title
-    const char* title = "Downloading...";
-    int title_width = GFX_truncateText(get_font_medium(), title, truncated, hw - SCALE1(PADDING * 4), SCALE1(BUTTON_PADDING * 2));
-    GFX_blitPill(ASSET_BLACK_PILL, screen, &(SDL_Rect){SCALE1(PADDING), SCALE1(PADDING), title_width, SCALE1(PILL_SIZE)});
-
-    SDL_Surface* title_text = TTF_RenderUTF8_Blended(get_font_medium(), truncated, COLOR_GRAY);
-    if (title_text) {
-        SDL_BlitSurface(title_text, NULL, screen, &(SDL_Rect){SCALE1(PADDING) + SCALE1(BUTTON_PADDING), SCALE1(PADDING + 4)});
-        SDL_FreeSurface(title_text);
-    }
-
-    // Hardware status
-    if (hw >= SCALE1(320)) {
-        GFX_blitHardwareGroup(screen, show_setting);
-    }
+    render_screen_header(screen, "Downloading...", show_setting);
 
     const YouTubeDownloadStatus* status = YouTube_getDownloadStatus();
 
@@ -558,23 +406,8 @@ void render_youtube_updating(SDL_Surface* screen, int show_setting) {
 
     int hw = screen->w;
     int hh = screen->h;
-    char truncated[256];
 
-    // Title
-    const char* title = "Updating yt-dlp";
-    int title_width = GFX_truncateText(get_font_medium(), title, truncated, hw - SCALE1(PADDING * 4), SCALE1(BUTTON_PADDING * 2));
-    GFX_blitPill(ASSET_BLACK_PILL, screen, &(SDL_Rect){SCALE1(PADDING), SCALE1(PADDING), title_width, SCALE1(PILL_SIZE)});
-
-    SDL_Surface* title_text = TTF_RenderUTF8_Blended(get_font_medium(), truncated, COLOR_GRAY);
-    if (title_text) {
-        SDL_BlitSurface(title_text, NULL, screen, &(SDL_Rect){SCALE1(PADDING) + SCALE1(BUTTON_PADDING), SCALE1(PADDING + 4)});
-        SDL_FreeSurface(title_text);
-    }
-
-    // Hardware status
-    if (hw >= SCALE1(320)) {
-        GFX_blitHardwareGroup(screen, show_setting);
-    }
+    render_screen_header(screen, "Updating yt-dlp", show_setting);
 
     const YouTubeUpdateStatus* status = YouTube_getUpdateStatus();
 

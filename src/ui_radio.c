@@ -5,6 +5,7 @@
 #include "api.h"
 #include "ui_radio.h"
 #include "ui_fonts.h"
+#include "ui_utils.h"
 #include "ui_album_art.h"
 #include "radio_album_art.h"
 #include "radio_curated.h"
@@ -15,91 +16,44 @@ void render_radio_list(SDL_Surface* screen, int show_setting,
     GFX_clear(screen);
 
     int hw = screen->w;
-    int hh = screen->h;
     char truncated[256];
 
-    // Title
-    const char* title = "Internet Radio";
-    int title_width = GFX_truncateText(get_font_medium(), title, truncated, hw - SCALE1(PADDING * 4), SCALE1(BUTTON_PADDING * 2));
-    GFX_blitPill(ASSET_BLACK_PILL, screen, &(SDL_Rect){SCALE1(PADDING), SCALE1(PADDING), title_width, SCALE1(PILL_SIZE)});
-
-    SDL_Surface* title_text = TTF_RenderUTF8_Blended(get_font_medium(), truncated, COLOR_GRAY);
-    if (title_text) {
-        SDL_BlitSurface(title_text, NULL, screen, &(SDL_Rect){SCALE1(PADDING) + SCALE1(BUTTON_PADDING), SCALE1(PADDING + 4)});
-        SDL_FreeSurface(title_text);
-    }
-
-    // Hardware status
-    if (hw >= SCALE1(320)) {
-        GFX_blitHardwareGroup(screen, show_setting);
-    }
+    render_screen_header(screen, "Internet Radio", show_setting);
 
     // Station list
     RadioStation* stations;
     int station_count = Radio_getStations(&stations);
 
-    int list_y = SCALE1(PADDING + PILL_SIZE + BUTTON_MARGIN);
-    int list_h = hh - list_y - SCALE1(PADDING + BUTTON_SIZE + BUTTON_MARGIN);
-    int item_h = SCALE1(PILL_SIZE);
-    int items_per_page = list_h / item_h;
+    // Use common list layout calculation
+    ListLayout layout = calc_list_layout(screen, 0);
+    adjust_list_scroll(radio_selected, radio_scroll, layout.items_per_page);
 
-    // Adjust scroll
-    if (radio_selected < *radio_scroll) {
-        *radio_scroll = radio_selected;
-    }
-    if (radio_selected >= *radio_scroll + items_per_page) {
-        *radio_scroll = radio_selected - items_per_page + 1;
-    }
-
-    int max_width = hw - SCALE1(PADDING * 4);
-
-    for (int i = 0; i < items_per_page && *radio_scroll + i < station_count; i++) {
+    for (int i = 0; i < layout.items_per_page && *radio_scroll + i < station_count; i++) {
         int idx = *radio_scroll + i;
         RadioStation* station = &stations[idx];
         bool selected = (idx == radio_selected);
 
-        int y = list_y + i * item_h;
+        int y = layout.list_y + i * layout.item_h;
 
-        // Calculate text width for pill sizing
-        char truncated[256];
-        int pill_width = calc_list_pill_width(get_font_large(), station->name, truncated, max_width, 0);
+        // Render pill background and get text position
+        ListItemPos pos = render_list_item_pill(screen, &layout, station->name, truncated, y, selected, 0);
 
-        // Background pill (sized to text width)
-        SDL_Rect pill_rect = {SCALE1(PADDING), y, pill_width, item_h};
-        draw_list_item_bg(screen, &pill_rect, selected);
-
-        // Station name
-        SDL_Color text_color = get_list_text_color(selected);
-        int text_x = SCALE1(PADDING) + SCALE1(BUTTON_PADDING);
-        int text_y = y + (item_h - TTF_FontHeight(get_font_large())) / 2;
-        SDL_Surface* name_text = TTF_RenderUTF8_Blended(get_font_large(), station->name, text_color);
-        if (name_text) {
-            SDL_Rect src = {0, 0, name_text->w > max_width ? max_width : name_text->w, name_text->h};
-            SDL_BlitSurface(name_text, &src, screen, &(SDL_Rect){text_x, text_y});
-            SDL_FreeSurface(name_text);
-        }
+        // Station name (no scrolling for radio list)
+        render_list_item_text(screen, NULL, station->name, get_font_medium(),
+                              pos.text_x, pos.text_y, layout.max_width, selected);
 
         // Genre (if available)
         if (station->genre[0]) {
             SDL_Color genre_color = selected ? COLOR_GRAY : COLOR_DARK_TEXT;
             SDL_Surface* genre_text = TTF_RenderUTF8_Blended(get_font_tiny(), station->genre, genre_color);
             if (genre_text) {
-                SDL_BlitSurface(genre_text, NULL, screen, &(SDL_Rect){hw - genre_text->w - SCALE1(PADDING * 2), y + (item_h - genre_text->h) / 2});
+                SDL_BlitSurface(genre_text, NULL, screen, &(SDL_Rect){hw - genre_text->w - SCALE1(PADDING * 2), y + (layout.item_h - genre_text->h) / 2});
                 SDL_FreeSurface(genre_text);
             }
         }
     }
 
-    // Scroll indicators
-    if (station_count > items_per_page) {
-        int ox = (hw - SCALE1(24)) / 2;
-        if (*radio_scroll > 0) {
-            GFX_blitAsset(ASSET_SCROLL_UP, NULL, screen, &(SDL_Rect){ox, SCALE1(PADDING + PILL_SIZE)});
-        }
-        if (*radio_scroll + items_per_page < station_count) {
-            GFX_blitAsset(ASSET_SCROLL_DOWN, NULL, screen, &(SDL_Rect){ox, hh - SCALE1(PADDING + PILL_SIZE + BUTTON_SIZE)});
-        }
-    }
+    render_scroll_indicators(screen, *radio_scroll, layout.items_per_page, station_count);
 
     // Button hints
     GFX_blitButtonGroup((char*[]){"Y", "MANAGE STATIONS", NULL}, 0, screen, 0);
@@ -371,24 +325,9 @@ void render_radio_add(SDL_Surface* screen, int show_setting,
     GFX_clear(screen);
 
     int hw = screen->w;
-    int hh = screen->h;
     char truncated[256];
 
-    // Title
-    const char* title = "Add Stations";
-    int title_width = GFX_truncateText(get_font_medium(), title, truncated, hw - SCALE1(PADDING * 4), SCALE1(BUTTON_PADDING * 2));
-    GFX_blitPill(ASSET_BLACK_PILL, screen, &(SDL_Rect){SCALE1(PADDING), SCALE1(PADDING), title_width, SCALE1(PILL_SIZE)});
-
-    SDL_Surface* title_text = TTF_RenderUTF8_Blended(get_font_medium(), truncated, COLOR_GRAY);
-    if (title_text) {
-        SDL_BlitSurface(title_text, NULL, screen, &(SDL_Rect){SCALE1(PADDING) + SCALE1(BUTTON_PADDING), SCALE1(PADDING + 4)});
-        SDL_FreeSurface(title_text);
-    }
-
-    // Hardware status
-    if (hw >= SCALE1(320)) {
-        GFX_blitHardwareGroup(screen, show_setting);
-    }
+    render_screen_header(screen, "Add Stations", show_setting);
 
     // Subtitle
     const char* subtitle = "Select Country";
@@ -402,68 +341,37 @@ void render_radio_add(SDL_Surface* screen, int show_setting,
     int country_count = Radio_getCuratedCountryCount();
     const CuratedCountry* countries = Radio_getCuratedCountries();
 
-    int list_y = SCALE1(PADDING + PILL_SIZE + BUTTON_MARGIN + 20);
-    int list_h = hh - list_y - SCALE1(PADDING + BUTTON_SIZE + BUTTON_MARGIN);
-    int item_h = SCALE1(PILL_SIZE);
-    int items_per_page = list_h / item_h;
+    // Use common list layout calculation with offset for subtitle
+    ListLayout layout = calc_list_layout(screen, SCALE1(20));
+    adjust_list_scroll(add_country_selected, add_country_scroll, layout.items_per_page);
 
-    // Adjust scroll
-    if (add_country_selected < *add_country_scroll) {
-        *add_country_scroll = add_country_selected;
-    }
-    if (add_country_selected >= *add_country_scroll + items_per_page) {
-        *add_country_scroll = add_country_selected - items_per_page + 1;
-    }
-
-    int max_width = hw - SCALE1(PADDING * 4);
-
-    for (int i = 0; i < items_per_page && *add_country_scroll + i < country_count; i++) {
+    for (int i = 0; i < layout.items_per_page && *add_country_scroll + i < country_count; i++) {
         int idx = *add_country_scroll + i;
         const CuratedCountry* country = &countries[idx];
         bool selected = (idx == add_country_selected);
 
-        int y = list_y + i * item_h;
+        int y = layout.list_y + i * layout.item_h;
 
-        // Calculate text width for pill sizing
-        char truncated[256];
-        int pill_width = calc_list_pill_width(get_font_large(), country->name, truncated, max_width, 0);
-
-        // Background pill (sized to text width)
-        SDL_Rect pill_rect = {SCALE1(PADDING), y, pill_width, item_h};
-        draw_list_item_bg(screen, &pill_rect, selected);
+        // Render pill background and get text position
+        ListItemPos pos = render_list_item_pill(screen, &layout, country->name, truncated, y, selected, 0);
 
         // Country name
-        SDL_Color text_color = get_list_text_color(selected);
-        int text_x = SCALE1(PADDING) + SCALE1(BUTTON_PADDING);
-        int text_y = y + (item_h - TTF_FontHeight(get_font_large())) / 2;
-        SDL_Surface* name_text = TTF_RenderUTF8_Blended(get_font_large(), country->name, text_color);
-        if (name_text) {
-            SDL_BlitSurface(name_text, NULL, screen, &(SDL_Rect){text_x, text_y});
-            SDL_FreeSurface(name_text);
-        }
+        render_list_item_text(screen, NULL, country->name, get_font_medium(),
+                              pos.text_x, pos.text_y, layout.max_width, selected);
 
         // Station count on right
-        int station_count = Radio_getCuratedStationCount(country->code);
+        int curated_station_count = Radio_getCuratedStationCount(country->code);
         char count_str[32];
-        snprintf(count_str, sizeof(count_str), "%d stations", station_count);
+        snprintf(count_str, sizeof(count_str), "%d stations", curated_station_count);
         SDL_Color count_color = selected ? COLOR_GRAY : COLOR_DARK_TEXT;
         SDL_Surface* count_text = TTF_RenderUTF8_Blended(get_font_tiny(), count_str, count_color);
         if (count_text) {
-            SDL_BlitSurface(count_text, NULL, screen, &(SDL_Rect){hw - count_text->w - SCALE1(PADDING * 2), y + (item_h - count_text->h) / 2});
+            SDL_BlitSurface(count_text, NULL, screen, &(SDL_Rect){hw - count_text->w - SCALE1(PADDING * 2), y + (layout.item_h - count_text->h) / 2});
             SDL_FreeSurface(count_text);
         }
     }
 
-    // Scroll indicators
-    if (country_count > items_per_page) {
-        int ox = (hw - SCALE1(24)) / 2;
-        if (*add_country_scroll > 0) {
-            GFX_blitAsset(ASSET_SCROLL_UP, NULL, screen, &(SDL_Rect){ox, SCALE1(PADDING + PILL_SIZE)});
-        }
-        if (*add_country_scroll + items_per_page < country_count) {
-            GFX_blitAsset(ASSET_SCROLL_DOWN, NULL, screen, &(SDL_Rect){ox, hh - SCALE1(PADDING + PILL_SIZE + BUTTON_SIZE)});
-        }
-    }
+    render_scroll_indicators(screen, *add_country_scroll, layout.items_per_page, country_count);
 
     // Button hints
     GFX_blitButtonGroup((char*[]){"Y", "HELP", NULL}, 0, screen, 0);
@@ -478,7 +386,6 @@ void render_radio_add_stations(SDL_Surface* screen, int show_setting,
     GFX_clear(screen);
 
     int hw = screen->w;
-    int hh = screen->h;
     char truncated[256];
 
     // Get country name for title
@@ -492,20 +399,7 @@ void render_radio_add_stations(SDL_Surface* screen, int show_setting,
         }
     }
 
-    // Title
-    int title_width = GFX_truncateText(get_font_medium(), country_name, truncated, hw - SCALE1(PADDING * 4), SCALE1(BUTTON_PADDING * 2));
-    GFX_blitPill(ASSET_BLACK_PILL, screen, &(SDL_Rect){SCALE1(PADDING), SCALE1(PADDING), title_width, SCALE1(PILL_SIZE)});
-
-    SDL_Surface* title_text = TTF_RenderUTF8_Blended(get_font_medium(), truncated, COLOR_GRAY);
-    if (title_text) {
-        SDL_BlitSurface(title_text, NULL, screen, &(SDL_Rect){SCALE1(PADDING) + SCALE1(BUTTON_PADDING), SCALE1(PADDING + 4)});
-        SDL_FreeSurface(title_text);
-    }
-
-    // Hardware status
-    if (hw >= SCALE1(320)) {
-        GFX_blitHardwareGroup(screen, show_setting);
-    }
+    render_screen_header(screen, country_name, show_setting);
 
     // Get stations for selected country
     int station_count = 0;
@@ -526,29 +420,17 @@ void render_radio_add_stations(SDL_Surface* screen, int show_setting,
         SDL_FreeSurface(sub_text);
     }
 
-    // Station list
-    int list_y = SCALE1(PADDING + PILL_SIZE + BUTTON_MARGIN + 20);
-    int list_h = hh - list_y - SCALE1(PADDING + BUTTON_SIZE + BUTTON_MARGIN);
-    int item_h = SCALE1(PILL_SIZE);
-    int items_per_page = list_h / item_h;
+    // Use common list layout calculation with offset for subtitle
+    ListLayout layout = calc_list_layout(screen, SCALE1(20));
+    adjust_list_scroll(add_station_selected, add_station_scroll, layout.items_per_page);
 
-    // Adjust scroll
-    if (add_station_selected < *add_station_scroll) {
-        *add_station_scroll = add_station_selected;
-    }
-    if (add_station_selected >= *add_station_scroll + items_per_page) {
-        *add_station_scroll = add_station_selected - items_per_page + 1;
-    }
-
-    int max_width = hw - SCALE1(PADDING * 4);
-
-    for (int i = 0; i < items_per_page && *add_station_scroll + i < station_count; i++) {
+    for (int i = 0; i < layout.items_per_page && *add_station_scroll + i < station_count; i++) {
         int idx = *add_station_scroll + i;
         const CuratedStation* station = &stations[idx];
         bool selected = (idx == add_station_selected);
         bool checked = (idx < 256) ? add_station_checked[idx] : false;
 
-        int y = list_y + i * item_h;
+        int y = layout.list_y + i * layout.item_h;
 
         // Calculate checkbox width first
         const char* checkbox = checked ? "[x]" : "[ ]";
@@ -558,55 +440,40 @@ void render_radio_add_stations(SDL_Surface* screen, int show_setting,
         cb_width = cb_w + SCALE1(6);
 
         // Calculate text width for pill sizing (checkbox + station name)
-        char truncated[256];
-        int name_max_width = max_width - cb_width - SCALE1(60);
-        int text_width = GFX_truncateText(get_font_large(), station->name, truncated, name_max_width, SCALE1(BUTTON_PADDING * 2));
-        int pill_width = MIN(max_width, cb_width + text_width + SCALE1(BUTTON_PADDING));
+        int name_max_width = layout.max_width - cb_width - SCALE1(60);
+        int text_width = GFX_truncateText(get_font_medium(), station->name, truncated, name_max_width, SCALE1(BUTTON_PADDING * 2));
+        int pill_width = MIN(layout.max_width, cb_width + text_width + SCALE1(BUTTON_PADDING));
 
         // Background pill (sized to text width)
-        SDL_Rect pill_rect = {SCALE1(PADDING), y, pill_width, item_h};
+        SDL_Rect pill_rect = {SCALE1(PADDING), y, pill_width, layout.item_h};
         draw_list_item_bg(screen, &pill_rect, selected);
 
         // Checkbox indicator
         SDL_Color cb_color = get_list_text_color(selected);
         int text_x = SCALE1(PADDING) + SCALE1(BUTTON_PADDING);
-        int text_y = y + (item_h - TTF_FontHeight(get_font_large())) / 2;
+        int text_y = y + (layout.item_h - TTF_FontHeight(get_font_medium())) / 2;
         SDL_Surface* cb_text = TTF_RenderUTF8_Blended(get_font_small(), checkbox, cb_color);
         if (cb_text) {
-            SDL_BlitSurface(cb_text, NULL, screen, &(SDL_Rect){text_x, y + (item_h - cb_text->h) / 2});
+            SDL_BlitSurface(cb_text, NULL, screen, &(SDL_Rect){text_x, y + (layout.item_h - cb_text->h) / 2});
             SDL_FreeSurface(cb_text);
         }
 
         // Station name
-        SDL_Color text_color = get_list_text_color(selected);
-        SDL_Surface* name_text = TTF_RenderUTF8_Blended(get_font_large(), station->name, text_color);
-        if (name_text) {
-            SDL_Rect src = {0, 0, name_text->w > name_max_width ? name_max_width : name_text->w, name_text->h};
-            SDL_BlitSurface(name_text, &src, screen, &(SDL_Rect){text_x + cb_width, text_y});
-            SDL_FreeSurface(name_text);
-        }
+        render_list_item_text(screen, NULL, station->name, get_font_medium(),
+                              text_x + cb_width, text_y, name_max_width, selected);
 
         // Genre on right
         if (station->genre[0]) {
             SDL_Color genre_color = selected ? COLOR_GRAY : COLOR_DARK_TEXT;
             SDL_Surface* genre_text = TTF_RenderUTF8_Blended(get_font_tiny(), station->genre, genre_color);
             if (genre_text) {
-                SDL_BlitSurface(genre_text, NULL, screen, &(SDL_Rect){hw - genre_text->w - SCALE1(PADDING * 2), y + (item_h - genre_text->h) / 2});
+                SDL_BlitSurface(genre_text, NULL, screen, &(SDL_Rect){hw - genre_text->w - SCALE1(PADDING * 2), y + (layout.item_h - genre_text->h) / 2});
                 SDL_FreeSurface(genre_text);
             }
         }
     }
 
-    // Scroll indicators
-    if (station_count > items_per_page) {
-        int ox = (hw - SCALE1(24)) / 2;
-        if (*add_station_scroll > 0) {
-            GFX_blitAsset(ASSET_SCROLL_UP, NULL, screen, &(SDL_Rect){ox, SCALE1(PADDING + PILL_SIZE)});
-        }
-        if (*add_station_scroll + items_per_page < station_count) {
-            GFX_blitAsset(ASSET_SCROLL_DOWN, NULL, screen, &(SDL_Rect){ox, hh - SCALE1(PADDING + PILL_SIZE + BUTTON_SIZE)});
-        }
-    }
+    render_scroll_indicators(screen, *add_station_scroll, layout.items_per_page, station_count);
 
     // Button hints
     GFX_blitButtonGroup((char*[]){"X", "SAVE", NULL}, 0, screen, 0);
@@ -619,23 +486,8 @@ void render_radio_help(SDL_Surface* screen, int show_setting, int* help_scroll) 
 
     int hw = screen->w;
     int hh = screen->h;
-    char truncated[256];
 
-    // Title
-    const char* title = "How to Add Stations";
-    int title_width = GFX_truncateText(get_font_medium(), title, truncated, hw - SCALE1(PADDING * 4), SCALE1(BUTTON_PADDING * 2));
-    GFX_blitPill(ASSET_BLACK_PILL, screen, &(SDL_Rect){SCALE1(PADDING), SCALE1(PADDING), title_width, SCALE1(PILL_SIZE)});
-
-    SDL_Surface* title_text = TTF_RenderUTF8_Blended(get_font_medium(), truncated, COLOR_GRAY);
-    if (title_text) {
-        SDL_BlitSurface(title_text, NULL, screen, &(SDL_Rect){SCALE1(PADDING) + SCALE1(BUTTON_PADDING), SCALE1(PADDING + 4)});
-        SDL_FreeSurface(title_text);
-    }
-
-    // Hardware status (WiFi, battery)
-    if (hw >= SCALE1(320)) {
-        GFX_blitHardwareGroup(screen, show_setting);
-    }
+    render_screen_header(screen, "How to Add Stations", show_setting);
 
     // Instructions text
     int content_start_y = SCALE1(PADDING + PILL_SIZE + BUTTON_MARGIN + 10);

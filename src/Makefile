@@ -28,7 +28,7 @@ MBEDTLS_SRC = $(wildcard include/mbedtls_lib/*.c)
 HELIX_AAC_SRC = $(wildcard include/helix-aac/*.c)
 
 SOURCE = $(TARGET).c player.c radio.c radio_net.c radio_album_art.c radio_hls.c radio_curated.c youtube.c selfupdate.c \
-         ui_fonts.c ui_utils.c browser.c ui_album_art.c ui_music.c ui_radio.c ui_youtube.c ui_system.c \
+         ui_fonts.c ui_utils.c browser.c ui_album_art.c ui_main.c ui_music.c ui_radio.c ui_youtube.c ui_system.c \
          include/parson/parson.c \
          include/mbedtls_entropy_alt.c \
          $(MBEDTLS_SRC) \

@@ -7,6 +7,7 @@
 #include "api.h"
 #include "ui_system.h"
 #include "ui_fonts.h"
+#include "ui_utils.h"
 #include "selfupdate.h"
 #include "qr_code_data.h"
 
@@ -16,23 +17,8 @@ void render_app_updating(SDL_Surface* screen, int show_setting) {
 
     int hw = screen->w;
     int hh = screen->h;
-    char truncated[256];
 
-    // Title
-    const char* title = "App Update";
-    int title_width = GFX_truncateText(get_font_medium(), title, truncated, hw - SCALE1(PADDING * 4), SCALE1(BUTTON_PADDING * 2));
-    GFX_blitPill(ASSET_BLACK_PILL, screen, &(SDL_Rect){SCALE1(PADDING), SCALE1(PADDING), title_width, SCALE1(PILL_SIZE)});
-
-    SDL_Surface* title_text = TTF_RenderUTF8_Blended(get_font_medium(), truncated, COLOR_GRAY);
-    if (title_text) {
-        SDL_BlitSurface(title_text, NULL, screen, &(SDL_Rect){SCALE1(PADDING) + SCALE1(BUTTON_PADDING), SCALE1(PADDING + 4)});
-        SDL_FreeSurface(title_text);
-    }
-
-    // Hardware status
-    if (hw >= SCALE1(320)) {
-        GFX_blitHardwareGroup(screen, show_setting);
-    }
+    render_screen_header(screen, "App Update", show_setting);
 
     const SelfUpdateStatus* status = SelfUpdate_getStatus();
     SelfUpdateState state = status->state;
@@ -192,23 +178,8 @@ void render_about(SDL_Surface* screen, int show_setting) {
 
     int hw = screen->w;
     int hh = screen->h;
-    char truncated[256];
 
-    // Title
-    const char* title = "About";
-    int title_width = GFX_truncateText(get_font_medium(), title, truncated, hw - SCALE1(PADDING * 4), SCALE1(BUTTON_PADDING * 2));
-    GFX_blitPill(ASSET_BLACK_PILL, screen, &(SDL_Rect){SCALE1(PADDING), SCALE1(PADDING), title_width, SCALE1(PILL_SIZE)});
-
-    SDL_Surface* title_text = TTF_RenderUTF8_Blended(get_font_medium(), truncated, COLOR_GRAY);
-    if (title_text) {
-        SDL_BlitSurface(title_text, NULL, screen, &(SDL_Rect){SCALE1(PADDING) + SCALE1(BUTTON_PADDING), SCALE1(PADDING + 4)});
-        SDL_FreeSurface(title_text);
-    }
-
-    // Hardware status
-    if (hw >= SCALE1(320)) {
-        GFX_blitHardwareGroup(screen, show_setting);
-    }
+    render_screen_header(screen, "About", show_setting);
 
     // App name with version
     const char* version = SelfUpdate_getVersion();

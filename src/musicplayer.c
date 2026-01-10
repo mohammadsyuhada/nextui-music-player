@@ -25,6 +25,7 @@
 #include "ui_utils.h"
 #include "browser.h"
 #include "ui_album_art.h"
+#include "ui_main.h"
 #include "ui_music.h"
 #include "ui_radio.h"
 #include "ui_youtube.h"
@@ -52,7 +53,7 @@ typedef enum {
 
 // FileEntry and BrowserContext are now in browser.h
 
-// Menu item count (menu_items moved to ui_music.c)
+// Menu item count (menu_items moved to ui_main.c)
 #define MENU_ITEM_COUNT 4
 
 // YouTube menu count (youtube_menu_items moved to ui_youtube.c)
@@ -781,6 +782,10 @@ int main(int argc, char* argv[]) {
                 if (youtube_menu_selected == 0) {
                     // Search Music - open keyboard
                     char* query = YouTube_openKeyboard("Search:");
+                    // Reset button state and re-poll to prevent keyboard B press from triggering menu back
+                    PAD_reset();
+                    PAD_poll();
+                    PAD_reset();
                     if (query && strlen(query) > 0) {
                         strncpy(youtube_search_query, query, sizeof(youtube_search_query) - 1);
                         youtube_search_query[sizeof(youtube_search_query) - 1] = '\0';
