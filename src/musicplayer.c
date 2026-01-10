@@ -467,6 +467,11 @@ int main(int argc, char* argv[]) {
                     repeat_enabled = !repeat_enabled;
                     dirty = 1;
                 }
+                else if (PAD_tappedSelect(SDL_GetTicks())) {
+                    // Toggle screen off manually
+                    screen_off = true;
+                    PLAT_enableBacklight(0);
+                }
 
                 // Check if track ended (only if still in playing state - not if user pressed back)
                 if (app_state == STATE_PLAYING) {
@@ -557,13 +562,16 @@ int main(int argc, char* argv[]) {
             }
 
             // Animate player title scroll (GPU mode, no screen redraw needed)
-            if (player_needs_scroll_refresh()) {
-                player_animate_scroll();
-            }
+            // Skip animations when screen is off to save battery
+            if (!screen_off) {
+                if (player_needs_scroll_refresh()) {
+                    player_animate_scroll();
+                }
 
-            // Animate spectrum visualizer (GPU mode)
-            if (Spectrum_needsRefresh()) {
-                Spectrum_renderGPU();
+                // Animate spectrum visualizer (GPU mode)
+                if (Spectrum_needsRefresh()) {
+                    Spectrum_renderGPU();
+                }
             }
         }
         else if (app_state == STATE_RADIO_LIST) {
@@ -654,6 +662,11 @@ int main(int argc, char* argv[]) {
                         autosleep_disabled = false;
                     }
                     dirty = 1;
+                }
+                else if (PAD_tappedSelect(SDL_GetTicks())) {
+                    // Toggle screen off manually
+                    screen_off = true;
+                    PLAT_enableBacklight(0);
                 }
 
                 // Update radio state

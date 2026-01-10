@@ -64,6 +64,7 @@ This pak is designed and tested only for the NextUI and TrimUI Brick @ Trimui Br
 - **D-Pad Down**: Prev Track
 - **D-Pad Right**: Fast Foward
 - **D-Pad Left**: Rewind
+- **Select**: Turn Off Screen
 - **Start**: Exit Application
 - **L/R Shoulders**: Prev/Next Track
 
@@ -71,6 +72,7 @@ This pak is designed and tested only for the NextUI and TrimUI Brick @ Trimui Br
 - **B Button**: Back/Stop
 - **D-Pad Up**: Next Station
 - **D-Pad Down**: Prev Station
+- **Select**: Turn Off Screen
 - **Start**: Exit Application
 - **L/R Shoulders**: Prev/Next Station
 
