@@ -692,6 +692,7 @@ int main(int argc, char* argv[]) {
                 else if (PAD_justPressed(BTN_B)) {
                     Radio_stop();
                     cleanup_album_art_background();  // Clear cached background when stopping
+                    RadioStatus_clear();  // Clear GPU status layer
                     app_state = STATE_RADIO_LIST;
                     if (autosleep_disabled) {
                         PWR_enableAutosleep();
@@ -720,8 +721,10 @@ int main(int argc, char* argv[]) {
                     }
                 }
 
-                // Always redraw for visualization
-                dirty = 1;
+                // Update status and buffer via GPU layer (no full refresh needed)
+                if (RadioStatus_needsRefresh()) {
+                    RadioStatus_renderGPU();
+                }
             }
         }
         else if (app_state == STATE_RADIO_ADD) {
@@ -1160,6 +1163,7 @@ cleanup:
     GFX_clearLayers(LAYER_SCROLLTEXT);
     PLAT_clearLayers(LAYER_SPECTRUM);
     PLAT_clearLayers(LAYER_PLAYTIME);
+    PLAT_clearLayers(LAYER_BUFFER);
 
     SelfUpdate_cleanup();
     YouTube_cleanup();

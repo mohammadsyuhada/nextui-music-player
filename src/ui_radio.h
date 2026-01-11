@@ -5,6 +5,9 @@
 #include <stdbool.h>
 #include "radio.h"
 
+// GPU layer for buffer indicator
+#define LAYER_BUFFER 4
+
 // Render the radio station list
 void render_radio_list(SDL_Surface* screen, int show_setting,
                        int radio_selected, int* radio_scroll);
@@ -24,5 +27,12 @@ void render_radio_add_stations(SDL_Surface* screen, int show_setting,
 
 // Render help/instructions screen
 void render_radio_help(SDL_Surface* screen, int show_setting, int* help_scroll);
+
+// GPU buffer indicator and status functions
+void RadioStatus_setPosition(int bar_x, int bar_y, int bar_w, int bar_h,
+                              int left_x, int left_y);
+void RadioStatus_clear(void);
+bool RadioStatus_needsRefresh(void);
+void RadioStatus_renderGPU(void);
 
 #endif

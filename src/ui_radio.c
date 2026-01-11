@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <string.h>
+#include <math.h>
 
 #include "defines.h"
 #include "api.h"
@@ -251,59 +252,18 @@ void render_radio_playing(SDL_Surface* screen, int show_setting, int radio_selec
     // Position for error message (was visualization area)
     int vis_y = hh - SCALE1(PADDING + BUTTON_SIZE + BUTTON_MARGIN + 90);
 
-    // === BOTTOM BAR ===
+    // === BOTTOM BAR (GPU rendered) ===
     int bottom_y = hh - SCALE1(PADDING + BUTTON_SIZE + BUTTON_MARGIN + 35);
 
-    // Bitrate on left (like time in local player) - white
-    int bitrate_end_x = SCALE1(PADDING);
-    int bitrate_h = 0;
-    if (meta->bitrate > 0) {
-        char bitrate_str[32];
-        snprintf(bitrate_str, sizeof(bitrate_str), "%d kbps", meta->bitrate);
-        SDL_Surface* br_surf = TTF_RenderUTF8_Blended(get_font_small(), bitrate_str, COLOR_WHITE);
-        if (br_surf) {
-            SDL_BlitSurface(br_surf, NULL, screen, &(SDL_Rect){SCALE1(PADDING), bottom_y});
-            bitrate_end_x = SCALE1(PADDING) + br_surf->w + SCALE1(6);
-            bitrate_h = br_surf->h;
-            SDL_FreeSurface(br_surf);
-        }
-    }
-
-    // Status text (tiny, gray) next to bitrate
-    const char* status_text = "";
-    switch (state) {
-        case RADIO_STATE_CONNECTING: status_text = "connecting"; break;
-        case RADIO_STATE_BUFFERING: status_text = "buffering"; break;
-        case RADIO_STATE_PLAYING: status_text = "streaming"; break;
-        case RADIO_STATE_ERROR: status_text = "error"; break;
-        default: break;
-    }
-    if (status_text[0]) {
-        SDL_Surface* status_surf = TTF_RenderUTF8_Blended(get_font_tiny(), status_text, COLOR_GRAY);
-        if (status_surf) {
-            int status_y = bottom_y + bitrate_h - status_surf->h;  // Align baselines
-            SDL_BlitSurface(status_surf, NULL, screen, &(SDL_Rect){bitrate_end_x, status_y});
-            SDL_FreeSurface(status_surf);
-        }
-    }
-
-    // Buffer level indicator on right (instead of SHUFFLE/REPEAT)
-    float buffer_level = Radio_getBufferLevel();
+    // Buffer bar dimensions (for GPU layer positioning)
     int bar_w = SCALE1(60);
     int bar_h = SCALE1(8);
     int bar_x = hw - SCALE1(PADDING) - bar_w;
     int bar_y = bottom_y + SCALE1(4);
 
-    // Draw buffer bar background
-    SDL_Rect bar_bg = {bar_x, bar_y, bar_w, bar_h};
-    SDL_FillRect(screen, &bar_bg, RGB_DARK_GRAY);
-
-    // Draw buffer fill
-    int fill_w = (int)(bar_w * buffer_level);
-    if (fill_w > 0) {
-        SDL_Rect bar_fill = {bar_x, bar_y, fill_w, bar_h};
-        SDL_FillRect(screen, &bar_fill, RGB_WHITE);
-    }
+    // Set positions for GPU rendering (bitrate + status on left, buffer bar on right)
+    RadioStatus_setPosition(bar_x, bar_y, bar_w, bar_h,
+                            SCALE1(PADDING), bottom_y);
 
     // Error message (displayed prominently if in error state)
     if (state == RADIO_STATE_ERROR) {
@@ -586,4 +546,172 @@ void render_radio_help(SDL_Surface* screen, int show_setting, int* help_scroll) 
 
     // Button hints
     GFX_blitButtonGroup((char*[]){"B", "BACK", NULL}, 1, screen, 1);
+}
+
+// === GPU STATUS AND BUFFER INDICATOR ===
+
+static int status_bar_x = 0, status_bar_y = 0, status_bar_w = 0, status_bar_h = 0;
+static int status_left_x = 0, status_left_y = 0;
+static bool status_position_set = false;
+static float last_buffer_level = -1.0f;
+static RadioState last_rendered_state = RADIO_STATE_STOPPED;
+static int last_bitrate_val = -1;
+
+void RadioStatus_setPosition(int bar_x, int bar_y, int bar_w, int bar_h,
+                              int left_x, int left_y) {
+    status_bar_x = bar_x;
+    status_bar_y = bar_y;
+    status_bar_w = bar_w;
+    status_bar_h = bar_h;
+    status_left_x = left_x;
+    status_left_y = left_y;
+    status_position_set = true;
+}
+
+void RadioStatus_clear(void) {
+    status_position_set = false;
+    last_buffer_level = -1.0f;
+    last_rendered_state = RADIO_STATE_STOPPED;
+    last_bitrate_val = -1;
+    PLAT_clearLayers(LAYER_BUFFER);
+    PLAT_GPU_Flip();
+}
+
+bool RadioStatus_needsRefresh(void) {
+    if (!status_position_set) return false;
+
+    RadioState state = Radio_getState();
+    float current_level = Radio_getBufferLevel();
+
+    // Get bitrate directly from metadata
+    const RadioMetadata* meta = Radio_getMetadata();
+    int current_bitrate = meta ? meta->bitrate : 0;
+
+    // Refresh if state changed, buffer level changed, or bitrate changed
+    if (state != last_rendered_state) return true;
+    if (fabsf(current_level - last_buffer_level) > 0.01f) return true;
+    if (current_bitrate != last_bitrate_val) return true;
+
+    return false;
+}
+
+void RadioStatus_renderGPU(void) {
+    if (!status_position_set) return;
+
+    RadioState state = Radio_getState();
+    float buffer_level = Radio_getBufferLevel();
+
+    // Get bitrate directly from metadata (updates asynchronously)
+    const RadioMetadata* meta = Radio_getMetadata();
+    int current_bitrate = meta ? meta->bitrate : 0;
+
+    // Skip if nothing changed
+    if (state == last_rendered_state &&
+        fabsf(buffer_level - last_buffer_level) <= 0.01f &&
+        current_bitrate == last_bitrate_val) return;
+
+    last_rendered_state = state;
+    last_buffer_level = buffer_level;
+    last_bitrate_val = current_bitrate;
+
+    // Get status text
+    const char* status_text = "";
+    switch (state) {
+        case RADIO_STATE_CONNECTING: status_text = "connecting"; break;
+        case RADIO_STATE_BUFFERING: status_text = "buffering"; break;
+        case RADIO_STATE_PLAYING: status_text = "streaming"; break;
+        case RADIO_STATE_ERROR: status_text = "error"; break;
+        default: break;
+    }
+
+    // Prepare bitrate string
+    char bitrate_str[32] = "";
+    if (current_bitrate > 0) {
+        snprintf(bitrate_str, sizeof(bitrate_str), "%d kbps", current_bitrate);
+    }
+
+    // Measure all elements
+    TTF_Font* bitrate_font = get_font_small();
+    TTF_Font* status_font = get_font_tiny();
+
+    int bitrate_w = 0, bitrate_h = 0;
+    if (bitrate_str[0]) {
+        TTF_SizeUTF8(bitrate_font, bitrate_str, &bitrate_w, &bitrate_h);
+    }
+
+    int status_w = 0, status_h = 0;
+    if (status_text[0]) {
+        TTF_SizeUTF8(status_font, status_text, &status_w, &status_h);
+    }
+
+    // Layout: [bitrate] [status] ----space---- [buffer bar]
+    // Left side starts at status_left_x, right side ends at status_bar_x + status_bar_w
+    int gap = SCALE1(6);
+    int left_x = status_left_x;
+    int right_x = status_bar_x + status_bar_w;
+
+    // Calculate line height for vertical centering
+    int line_h = bitrate_h;
+    if (status_h > line_h) line_h = status_h;
+    if (status_bar_h > line_h) line_h = status_bar_h;
+    int base_y = status_left_y;
+
+    // Surface covers from left edge to right edge
+    int surface_w = right_x - left_x;
+    int surface_h = line_h;
+
+    SDL_Surface* surface = SDL_CreateRGBSurfaceWithFormat(0,
+        surface_w, surface_h, 32, SDL_PIXELFORMAT_RGBA8888);
+    if (!surface) return;
+
+    SDL_FillRect(surface, NULL, 0);  // Transparent background
+
+    int x_offset = 0;
+
+    // Draw bitrate on left (white)
+    if (bitrate_str[0]) {
+        SDL_Color color = {255, 255, 255, 255};
+        SDL_Surface* text_surf = TTF_RenderUTF8_Blended(bitrate_font, bitrate_str, color);
+        if (text_surf) {
+            int y_pos = (line_h - bitrate_h) / 2;
+            SDL_Rect dst = {x_offset, y_pos, 0, 0};
+            SDL_BlitSurface(text_surf, NULL, surface, &dst);
+            SDL_FreeSurface(text_surf);
+        }
+        x_offset += bitrate_w + gap;
+    }
+
+    // Draw status text next to bitrate (gray)
+    if (status_text[0]) {
+        SDL_Color color = {128, 128, 128, 255};
+        SDL_Surface* text_surf = TTF_RenderUTF8_Blended(status_font, status_text, color);
+        if (text_surf) {
+            int y_pos = (line_h - status_h) / 2;
+            SDL_Rect dst = {x_offset, y_pos, 0, 0};
+            SDL_BlitSurface(text_surf, NULL, surface, &dst);
+            SDL_FreeSurface(text_surf);
+        }
+    }
+
+    // Draw buffer bar on right side
+    int bar_x_in_surface = surface_w - status_bar_w;
+    int bar_y_pos = (line_h - status_bar_h) / 2;
+
+    // Buffer bar background (dark gray)
+    SDL_Rect bar_bg = {bar_x_in_surface, bar_y_pos, status_bar_w, status_bar_h};
+    SDL_FillRect(surface, &bar_bg, SDL_MapRGBA(surface->format, 60, 60, 60, 255));
+
+    // Buffer fill (white)
+    int fill_w = (int)(status_bar_w * buffer_level);
+    if (fill_w > 0) {
+        SDL_Rect bar_fill = {bar_x_in_surface, bar_y_pos, fill_w, status_bar_h};
+        SDL_FillRect(surface, &bar_fill, SDL_MapRGBA(surface->format, 255, 255, 255, 255));
+    }
+
+    // Render to GPU layer
+    PLAT_clearLayers(LAYER_BUFFER);
+    PLAT_drawOnLayer(surface, left_x, base_y, surface_w, surface_h, 1.0f, false, LAYER_BUFFER);
+    SDL_FreeSurface(surface);
+
+    PLAT_GPU_Flip();
 }
