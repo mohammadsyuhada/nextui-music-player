@@ -49,6 +49,24 @@ static SDL_Surface* convert_to_argb8888(SDL_Surface* src) {
     return converted;
 }
 
+// Check if downloaded image data is complete (not truncated)
+// JPEG: ends with FF D9, PNG: ends with IEND chunk
+static bool is_image_complete(const uint8_t* data, int size) {
+    if (size < 4) return false;
+    // JPEG: starts with FF D8, ends with FF D9
+    if (data[0] == 0xFF && data[1] == 0xD8) {
+        return (data[size - 2] == 0xFF && data[size - 1] == 0xD9);
+    }
+    // PNG: starts with 89 50 4E 47, ends with IEND chunk (AE 42 60 82)
+    if (data[0] == 0x89 && data[1] == 0x50 && data[2] == 0x4E && data[3] == 0x47) {
+        return (size >= 8 &&
+                data[size - 4] == 0xAE && data[size - 3] == 0x42 &&
+                data[size - 2] == 0x60 && data[size - 1] == 0x82);
+    }
+    // Unknown format — assume complete
+    return true;
+}
+
 // Fetch podcast artwork from URL (cached in podcast folder)
 // feed_id: the podcast's feed_id for storing artwork in its folder
 static void podcast_fetch_artwork(const char* artwork_url, const char* feed_id) {
@@ -82,23 +100,27 @@ static void podcast_fetch_artwork(const char* artwork_url, const char* feed_id) 
         if (size > 0 && size < PODCAST_ARTWORK_MAX_SIZE) {
             uint8_t* data = (uint8_t*)malloc(size);
             if (data && fread(data, 1, size, f) == (size_t)size) {
-                SDL_RWops* rw = SDL_RWFromConstMem(data, size);
-                if (rw) {
-                    SDL_Surface* loaded = IMG_Load_RW(rw, 1);
-                    podcast_artwork = convert_to_argb8888(loaded);
+                if (is_image_complete(data, size)) {
+                    SDL_RWops* rw = SDL_RWFromConstMem(data, size);
+                    if (rw) {
+                        SDL_Surface* loaded = IMG_Load_RW(rw, 1);
+                        podcast_artwork = convert_to_argb8888(loaded);
+                    }
                 }
             }
             free(data);
         }
         fclose(f);
         if (podcast_artwork) return;
+        // Cached file is corrupt/incomplete — delete it so we re-fetch
+        remove(cache_path);
     }
 
     // Fetch from network using static buffer
     static uint8_t artwork_buffer[PODCAST_ARTWORK_MAX_SIZE];
     int size = radio_net_fetch(artwork_url, artwork_buffer, PODCAST_ARTWORK_MAX_SIZE, NULL, 0);
 
-    if (size > 0) {
+    if (size > 0 && is_image_complete(artwork_buffer, size)) {
         // Save to podcast folder (directory should already exist from subscription)
         f = fopen(cache_path, "wb");
         if (f) {
@@ -290,7 +312,7 @@ static bool artwork_fetch_one(const char* itunes_id, const char* artwork_url, in
     // Fetch from network
     static uint8_t art_buf[PODCAST_ARTWORK_MAX_SIZE];
     int dl_size = radio_net_fetch(artwork_url, art_buf, PODCAST_ARTWORK_MAX_SIZE, NULL, 0);
-    if (dl_size <= 0) return false;
+    if (dl_size <= 0 || !is_image_complete(art_buf, dl_size)) return false;
 
     // Save to disk cache
     mkdir(PODCAST_CACHE_PARENT, 0755);
