@@ -95,6 +95,13 @@ ModuleExitReason PodcastModule_run(SDL_Surface* screen) {
     Podcast_init();
     Keyboard_init();
 
+    // Auto-check for new episodes once per app session
+    static bool auto_refreshed = false;
+    if (!auto_refreshed && Wifi_isConnected() && Podcast_getSubscriptionCount() > 0) {
+        Podcast_startRefreshAll();
+        auto_refreshed = true;
+    }
+
     PodcastInternalState state = PODCAST_INTERNAL_MENU;
     int dirty = 1;
     int show_setting = 0;
@@ -180,6 +187,13 @@ ModuleExitReason PodcastModule_run(SDL_Surface* screen) {
         // =========================================
         if (state == PODCAST_INTERNAL_MENU) {
             Podcast_update();
+
+            // Check for background refresh completion
+            if (Podcast_checkRefreshCompleted()) {
+                Podcast_saveSubscriptions();
+                dirty = 1;
+            }
+
             int cl_count_raw = Podcast_getContinueListeningCount();
             int cl_count = (cl_count_raw > PODCAST_CONTINUE_LISTENING_DISPLAY) ? PODCAST_CONTINUE_LISTENING_DISPLAY : cl_count_raw;
             int sub_count = Podcast_getSubscriptionCount();
@@ -523,6 +537,23 @@ ModuleExitReason PodcastModule_run(SDL_Surface* screen) {
             PodcastFeed* feed = Podcast_getSubscription(podcast_current_feed_index);
             int count = feed ? feed->episode_count : 0;
 
+            // Check if refresh just completed
+            if (Podcast_checkRefreshCompleted()) {
+                feed = Podcast_getSubscription(podcast_current_feed_index);
+                count = feed ? feed->episode_count : 0;
+                Podcast_invalidateEpisodeCache();
+                if (feed && feed->new_episode_count > 0) {
+                    snprintf(podcast_toast_message, sizeof(podcast_toast_message),
+                             "%d new episode%s found!", feed->new_episode_count,
+                             feed->new_episode_count > 1 ? "s" : "");
+                } else {
+                    snprintf(podcast_toast_message, sizeof(podcast_toast_message), "Already up to date");
+                }
+                podcast_toast_time = SDL_GetTicks();
+                Podcast_saveSubscriptions();
+                dirty = 1;
+            }
+
             // Force redraw when downloads active
             int queue_count = 0;
             PodcastDownloadItem* queue = Podcast_getDownloadQueue(&queue_count);
@@ -566,6 +597,8 @@ ModuleExitReason PodcastModule_run(SDL_Surface* screen) {
                     } else if (Podcast_episodeFileExists(feed, podcast_current_episode_index)) {
                         int load_result = Podcast_loadAndSeek(feed, podcast_current_episode_index);
                         if (load_result >= 0) {
+                            // Clear new flag only when actually playing
+                            Podcast_clearNewFlag(podcast_current_feed_index, podcast_current_episode_index);
                             Podcast_clearTitleScroll();
                             ModuleCommon_recordInputTime();
                             last_progress_save_time = SDL_GetTicks();
@@ -614,6 +647,20 @@ ModuleExitReason PodcastModule_run(SDL_Surface* screen) {
                         snprintf(podcast_toast_message, sizeof(podcast_toast_message), "Marked as played");
                     }
                     Podcast_flushProgress();
+                    podcast_toast_time = SDL_GetTicks();
+                }
+                dirty = 1;
+            }
+            else if (PAD_justPressed(BTN_Y) && feed) {
+                if (Podcast_isRefreshing()) {
+                    snprintf(podcast_toast_message, sizeof(podcast_toast_message), "Already refreshing...");
+                    podcast_toast_time = SDL_GetTicks();
+                } else if (!Wifi_ensureConnected(screen, show_setting)) {
+                    snprintf(podcast_toast_message, sizeof(podcast_toast_message), "No network connection");
+                    podcast_toast_time = SDL_GetTicks();
+                } else {
+                    Podcast_startRefreshFeed(podcast_current_feed_index);
+                    snprintf(podcast_toast_message, sizeof(podcast_toast_message), "Checking for new episodes...");
                     podcast_toast_time = SDL_GetTicks();
                 }
                 dirty = 1;

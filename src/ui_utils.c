@@ -483,7 +483,8 @@ ListItemBadgedPos render_list_item_pill_badged(SDL_Surface* screen, ListLayout* 
 ListItemRichPos render_list_item_pill_rich(SDL_Surface* screen, ListLayout* layout,
                                             const char* title, const char* subtitle,
                                             char* truncated,
-                                            int y, bool selected, bool has_image) {
+                                            int y, bool selected, bool has_image,
+                                            int extra_subtitle_width) {
     ListItemRichPos pos;
 
     int item_h = SCALE1(PILL_SIZE) * 3 / 2;
@@ -508,7 +509,7 @@ ListItemRichPos render_list_item_pill_rich(SDL_Surface* screen, ListLayout* layo
     if (subtitle && subtitle[0]) {
         int sub_w;
         TTF_SizeUTF8(Fonts_getSmall(), subtitle, &sub_w, NULL);
-        int sub_pill_w = MIN(layout->max_width, image_area_w + sub_w + SCALE1(BUTTON_PADDING * 2));
+        int sub_pill_w = MIN(layout->max_width, image_area_w + sub_w + extra_subtitle_width + SCALE1(BUTTON_PADDING * 2));
         if (sub_pill_w > pos.pill_width)
             pos.pill_width = sub_pill_w;
     }

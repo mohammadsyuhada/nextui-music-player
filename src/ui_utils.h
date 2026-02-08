@@ -146,7 +146,8 @@ typedef struct {
 ListItemRichPos render_list_item_pill_rich(SDL_Surface* screen, ListLayout* layout,
                                             const char* title, const char* subtitle,
                                             char* truncated,
-                                            int y, bool selected, bool has_image);
+                                            int y, bool selected, bool has_image,
+                                            int extra_subtitle_width);
 
 // Position information returned by render_menu_item_pill
 typedef struct {

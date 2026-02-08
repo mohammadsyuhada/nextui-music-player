@@ -179,6 +179,13 @@ static pthread_mutex_t episode_cache_mutex = PTHREAD_MUTEX_INITIALIZER;
 static ContinueListeningEntry continue_listening[PODCAST_MAX_CONTINUE_LISTENING];
 static int continue_listening_count = 0;
 
+// Feed refresh
+static pthread_t refresh_thread;
+static volatile bool refresh_running = false;
+static int refresh_feed_index = -1;  // -1 = all feeds, >=0 = specific feed
+static volatile bool refresh_completed = false;
+#define REFRESH_COOLDOWN_SEC 900  // 15 minutes
+
 // Base data directory for podcast data
 static char podcast_data_dir[512] = "";
 
@@ -186,6 +193,7 @@ static char podcast_data_dir[512] = "";
 static void* search_thread_func(void* arg);
 static void* charts_thread_func(void* arg);
 static void* download_thread_func(void* arg);
+static void* refresh_thread_func(void* arg);
 static int Podcast_startDownloads(void);
 static void save_charts_cache(void);
 static bool load_charts_cache(void);
@@ -305,6 +313,7 @@ int Podcast_saveEpisodes(int feed_index, PodcastEpisode* episodes, int count) {
         if (ep->local_path[0]) {
             json_object_set_string(ep_obj, "local_path", ep->local_path);
         }
+        json_object_set_boolean(ep_obj, "is_new", ep->is_new);
 
         json_array_append_value(arr, ep_val);
     }
@@ -381,6 +390,7 @@ int Podcast_loadEpisodePage(int feed_index, int offset) {
         ep->pub_date = (uint32_t)json_object_get_number(ep_obj, "pub_date");
         ep->progress_sec = (int)json_object_get_number(ep_obj, "progress");
         ep->downloaded = json_object_get_boolean(ep_obj, "downloaded");
+        ep->is_new = (json_object_get_boolean(ep_obj, "is_new") == 1);
 
         // Cross-reference with progress.json (more recent than episodes.json)
         int cached_progress = Podcast_getProgress(feed->feed_url, ep->guid);
@@ -584,6 +594,11 @@ void Podcast_cleanup(void) {
     Podcast_cancelSearch();
     Podcast_stopDownloads();
     Podcast_stop();
+
+    // Wait for refresh thread to finish
+    for (int i = 0; i < 20 && refresh_running; i++) {
+        usleep(100000);
+    }
 
     // Save state
     Podcast_saveSubscriptions();
@@ -838,8 +853,9 @@ int Podcast_refreshFeed(int index) {
             JSON_Array* old_arr = json_value_get_array(old_root);
             if (old_arr) {
                 int old_count = json_array_get_count(old_arr);
-                // Preserve progress for matching episodes
+                // Preserve progress for matching episodes, detect new ones
                 for (int i = 0; i < new_episode_count; i++) {
+                    bool found_in_old = false;
                     for (int j = 0; j < old_count; j++) {
                         JSON_Object* old_ep = json_array_get_object(old_arr, j);
                         const char* old_guid = json_object_get_string(old_ep, "guid");
@@ -848,8 +864,13 @@ int Podcast_refreshFeed(int index) {
                             new_episodes[i].downloaded = json_object_get_boolean(old_ep, "downloaded");
                             const char* local = json_object_get_string(old_ep, "local_path");
                             if (local) strncpy(new_episodes[i].local_path, local, PODCAST_MAX_URL - 1);
+                            new_episodes[i].is_new = (json_object_get_boolean(old_ep, "is_new") == 1);
+                            found_in_old = true;
                             break;
                         }
+                    }
+                    if (!found_in_old) {
+                        new_episodes[i].is_new = true;  // Brand new episode
                     }
                 }
             }
@@ -871,6 +892,13 @@ int Podcast_refreshFeed(int index) {
 
         // Save new episodes to disk
         Podcast_saveEpisodes(index, new_episodes, new_episode_count);
+
+        // Recount new_episode_count from the episodes we just saved
+        int nc = 0;
+        for (int i = 0; i < new_episode_count; i++) {
+            if (new_episodes[i].is_new) nc++;
+        }
+        feed->new_episode_count = nc;
 
         // Invalidate cache if this feed was cached
         if (episode_cache_feed_index == index) {
@@ -907,6 +935,7 @@ void Podcast_saveSubscriptions(void) {
         json_object_set_number(feed_obj, "last_updated", feed->last_updated);
         json_object_set_number(feed_obj, "episode_count", feed->episode_count);
         // Note: episodes are stored separately in <feed_id>/episodes.json
+        // new_episode_count is computed dynamically from episodes.json
 
         json_array_append_value(arr, feed_val);
     }
@@ -964,6 +993,28 @@ void Podcast_loadSubscriptions(void) {
         subscription_count++;
     }
     pthread_mutex_unlock(&subscriptions_mutex);
+
+    // Compute new_episode_count dynamically from each feed's episodes.json
+    for (int i = 0; i < subscription_count; i++) {
+        PodcastFeed* feed = &subscriptions[i];
+        feed->new_episode_count = 0;
+        char episodes_path[512];
+        get_episodes_file_path(feed->feed_id, episodes_path, sizeof(episodes_path));
+        JSON_Value* ep_root = json_parse_file(episodes_path);
+        if (ep_root) {
+            JSON_Array* ep_arr = json_value_get_array(ep_root);
+            if (ep_arr) {
+                int ep_count = json_array_get_count(ep_arr);
+                for (int j = 0; j < ep_count; j++) {
+                    JSON_Object* ep_obj = json_array_get_object(ep_arr, j);
+                    if (ep_obj && json_object_get_boolean(ep_obj, "is_new") == 1) {
+                        feed->new_episode_count++;
+                    }
+                }
+            }
+            json_value_free(ep_root);
+        }
+    }
 
     json_value_free(root);
 }
@@ -1816,6 +1867,132 @@ int Podcast_getDownloadedEpisodeIndex(int feed_index, int episode_index) {
     }
 
     return index_among_downloaded;
+}
+
+// ============================================================================
+// Background Feed Refresh
+// ============================================================================
+
+static void* refresh_thread_func(void* arg) {
+    (void)arg;
+
+    if (refresh_feed_index >= 0) {
+        // Refresh single feed
+        Podcast_refreshFeed(refresh_feed_index);
+    } else {
+        // Refresh all feeds - snapshot count to avoid race with unsubscribe
+        pthread_mutex_lock(&subscriptions_mutex);
+        int count = subscription_count;
+        pthread_mutex_unlock(&subscriptions_mutex);
+        for (int i = 0; i < count && i < subscription_count; i++) {
+            if (!refresh_running) break;
+            Podcast_refreshFeed(i);
+        }
+    }
+
+    refresh_completed = true;
+    refresh_running = false;
+    return NULL;
+}
+
+int Podcast_startRefreshAll(void) {
+    if (refresh_running) return -1;
+    if (subscription_count == 0) return -1;
+
+    // Cooldown check: skip if all feeds were updated recently
+    time_t now = time(NULL);
+    bool any_stale = false;
+    for (int i = 0; i < subscription_count; i++) {
+        if ((now - (time_t)subscriptions[i].last_updated) > REFRESH_COOLDOWN_SEC) {
+            any_stale = true;
+            break;
+        }
+    }
+    if (!any_stale) return 0;  // All feeds are fresh
+
+    refresh_feed_index = -1;
+    refresh_completed = false;
+    refresh_running = true;
+
+    if (pthread_create(&refresh_thread, NULL, refresh_thread_func, NULL) != 0) {
+        refresh_running = false;
+        return -1;
+    }
+    pthread_detach(refresh_thread);
+    return 0;
+}
+
+int Podcast_startRefreshFeed(int index) {
+    if (refresh_running) return -1;
+    if (index < 0 || index >= subscription_count) return -1;
+
+    refresh_feed_index = index;
+    refresh_completed = false;
+    refresh_running = true;
+
+    if (pthread_create(&refresh_thread, NULL, refresh_thread_func, NULL) != 0) {
+        refresh_running = false;
+        return -1;
+    }
+    pthread_detach(refresh_thread);
+    return 0;
+}
+
+bool Podcast_isRefreshing(void) {
+    return refresh_running;
+}
+
+bool Podcast_checkRefreshCompleted(void) {
+    if (refresh_completed) {
+        refresh_completed = false;
+        return true;
+    }
+    return false;
+}
+
+void Podcast_clearNewFlag(int feed_index, int episode_index) {
+    if (feed_index < 0 || feed_index >= subscription_count) return;
+
+    PodcastEpisode* ep = Podcast_getEpisode(feed_index, episode_index);
+    if (!ep || !ep->is_new) return;
+
+    // Copy GUID before releasing cache reference
+    char guid_copy[PODCAST_MAX_GUID];
+    strncpy(guid_copy, ep->guid, PODCAST_MAX_GUID - 1);
+    guid_copy[PODCAST_MAX_GUID - 1] = '\0';
+
+    // Update in-memory cache under lock
+    pthread_mutex_lock(&episode_cache_mutex);
+    ep->is_new = false;
+    pthread_mutex_unlock(&episode_cache_mutex);
+
+    PodcastFeed* feed = &subscriptions[feed_index];
+    if (feed->new_episode_count > 0) {
+        feed->new_episode_count--;
+    }
+
+    // Update the on-disk episodes.json
+    set_feed_id(feed);
+    char episodes_path[512];
+    get_episodes_file_path(feed->feed_id, episodes_path, sizeof(episodes_path));
+
+    JSON_Value* root = json_parse_file(episodes_path);
+    if (root) {
+        JSON_Array* arr = json_value_get_array(root);
+        if (arr) {
+            int total = json_array_get_count(arr);
+            for (int i = 0; i < total; i++) {
+                JSON_Object* obj = json_array_get_object(arr, i);
+                const char* guid = json_object_get_string(obj, "guid");
+                if (guid && strcmp(guid, guid_copy) == 0) {
+                    json_object_set_boolean(obj, "is_new", false);
+                    break;
+                }
+            }
+            json_serialize_to_file_pretty(root, episodes_path);
+        }
+        json_value_free(root);
+    }
 }
 
 // ============================================================================

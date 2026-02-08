@@ -499,10 +499,10 @@ static void render_section_header(SDL_Surface* screen, const char* text, int y) 
 // --- Rich list item renderer (artwork + title + subtitle using rich pill) ---
 // Generic: works for subscriptions, search results, top shows
 // Thumbnails are memory-cache only (non-blocking). Lazy loading done by caller.
-static void render_rich_list_item(SDL_Surface* screen, ListLayout* layout,
+static ListItemRichPos render_rich_list_item(SDL_Surface* screen, ListLayout* layout,
     const char* title, const char* subtitle,
     const char* feed_id, const char* itunes_id,
-    int y, bool selected) {
+    int y, bool selected, int extra_subtitle_width) {
     char truncated[256];
 
     // Check memory cache only (non-blocking)
@@ -511,7 +511,7 @@ static void render_rich_list_item(SDL_Surface* screen, ListLayout* layout,
     SDL_Surface* thumb = cache_key ? find_cached_thumbnail(cache_key) : NULL;
     bool has_image = (thumb != NULL);
 
-    ListItemRichPos pos = render_list_item_pill_rich(screen, layout, title, subtitle, truncated, y, selected, has_image);
+    ListItemRichPos pos = render_list_item_pill_rich(screen, layout, title, subtitle, truncated, y, selected, has_image, extra_subtitle_width);
 
     if (thumb) {
         SDL_Rect dst = {pos.image_x, pos.image_y, pos.image_size, pos.image_size};
@@ -532,6 +532,8 @@ static void render_rich_list_item(SDL_Surface* screen, ListLayout* layout,
             SDL_FreeSurface(s);
         }
     }
+
+    return pos;
 }
 
 // Render redesigned podcast main page (continue listening + subscriptions with artwork)
@@ -667,7 +669,7 @@ void render_podcast_main_page(SDL_Surface* screen, int show_setting,
                 ContinueListeningEntry* entry = Podcast_getContinueListening(i);
                 if (entry) {
                     render_rich_list_item(screen, &pill_layout, entry->episode_title, entry->feed_title,
-                                          NULL, NULL, y, is_selected);
+                                          NULL, NULL, y, is_selected, 0);
                 }
             }
             cy += cl_item_h;
@@ -689,9 +691,40 @@ void render_podcast_main_page(SDL_Surface* screen, int show_setting,
             int y = draw_offset + cy;
 
             if (y + sub_item_h > base_y && y < base_y + viewport_h) {
-                char ep_str[32];
+                char ep_str[64];
                 snprintf(ep_str, sizeof(ep_str), "%d Episodes", feeds[i].episode_count);
-                render_rich_list_item(screen, &pill_layout, feeds[i].title, ep_str, feeds[i].feed_id, NULL, y, is_selected);
+
+                // Pre-calculate badge width so pill can account for it
+                char new_label[16];
+                int badge_extra = 0;
+                if (feeds[i].new_episode_count > 0) {
+                    snprintf(new_label, sizeof(new_label), "%d New", feeds[i].new_episode_count);
+                    int label_w = 0;
+                    TTF_SizeUTF8(Fonts_getTiny(), new_label, &label_w, NULL);
+                    badge_extra = SCALE1(4) + label_w + SCALE1(6);  // gap + text + pill padding
+                }
+
+                ListItemRichPos rpos = render_rich_list_item(screen, &pill_layout, feeds[i].title, ep_str, feeds[i].feed_id, NULL, y, is_selected, badge_extra);
+
+                // Render "N New" badge after subtitle text
+                if (feeds[i].new_episode_count > 0) {
+                    int sub_tw = 0;
+                    TTF_SizeUTF8(Fonts_getSmall(), ep_str, &sub_tw, NULL);
+                    int small_h = TTF_FontHeight(Fonts_getSmall());
+
+                    SDL_Surface* new_surf = TTF_RenderUTF8_Blended(Fonts_getTiny(), new_label, COLOR_WHITE);
+                    if (new_surf) {
+                        int badge_h = new_surf->h + SCALE1(2);
+                        int badge_w = new_surf->w + SCALE1(6);
+                        int badge_x = rpos.subtitle_x + sub_tw + SCALE1(4);
+                        int badge_y = rpos.subtitle_y + (small_h - badge_h) / 2;
+                        SDL_Rect bg = {badge_x, badge_y, badge_w, badge_h};
+                        SDL_FillRect(screen, &bg, THEME_COLOR2);
+                        SDL_BlitSurface(new_surf, NULL, screen,
+                                        &(SDL_Rect){badge_x + SCALE1(3), badge_y + SCALE1(1)});
+                        SDL_FreeSurface(new_surf);
+                    }
+                }
             }
             cy += sub_item_h;
         }
@@ -798,7 +831,7 @@ void render_podcast_top_shows(SDL_Surface* screen, int show_setting,
         int y = layout.list_y + i * layout.item_h;
 
         render_rich_list_item(screen, &layout, item->title, item->author,
-                              NULL, item->itunes_id, y, is_selected);
+                              NULL, item->itunes_id, y, is_selected, 0);
     }
 
     // Lazy fetch: fetch one uncached artwork per frame for visible items
@@ -888,7 +921,7 @@ void render_podcast_search_results(SDL_Surface* screen, int show_setting,
         int y = layout.list_y + i * layout.item_h;
 
         render_rich_list_item(screen, &layout, result->title, result->author,
-                              NULL, result->itunes_id, y, is_selected);
+                              NULL, result->itunes_id, y, is_selected, 0);
     }
 
     // Lazy fetch: fetch one uncached artwork per frame for visible items
@@ -1197,11 +1230,30 @@ void render_podcast_episodes(SDL_Surface* screen, int show_setting,
 
         // Subtitle (row 2)
         int small_h = TTF_FontHeight(Fonts_getSmall());
+        int subtitle_x_offset = 0;
+
+        // Render "New" badge pill if episode is new
+        if (ep->is_new) {
+            SDL_Surface* new_surf = TTF_RenderUTF8_Blended(Fonts_getTiny(), "New", COLOR_WHITE);
+            if (new_surf) {
+                int badge_h = new_surf->h + SCALE1(2);
+                int badge_w = new_surf->w + SCALE1(6);
+                int badge_y = pos.subtitle_y + (small_h - badge_h) / 2;
+                // Draw theme-colored pill background
+                SDL_Rect bg = {pos.subtitle_x, badge_y, badge_w, badge_h};
+                SDL_FillRect(screen, &bg, THEME_COLOR2);
+                // Draw text centered in pill
+                SDL_BlitSurface(new_surf, NULL, screen,
+                                &(SDL_Rect){pos.subtitle_x + SCALE1(3), badge_y + SCALE1(1)});
+                SDL_FreeSurface(new_surf);
+                subtitle_x_offset = badge_w + SCALE1(4);
+            }
+        }
 
         if (dl_status == PODCAST_DOWNLOAD_DOWNLOADING) {
             int bar_w = SCALE1(50);
             int bar_h = SCALE1(4);
-            int bar_x = pos.subtitle_x;
+            int bar_x = pos.subtitle_x + subtitle_x_offset;
             int bar_y = pos.subtitle_y + (small_h - bar_h) / 2;
             SDL_Rect bar_bg = {bar_x, bar_y, bar_w, bar_h};
             SDL_FillRect(screen, &bar_bg, SDL_MapRGB(screen->format, 60, 60, 60));
@@ -1213,9 +1265,10 @@ void render_podcast_episodes(SDL_Surface* screen, int show_setting,
         } else if (dl_status == PODCAST_DOWNLOAD_PENDING) {
             SDL_Surface* queued_surf = TTF_RenderUTF8_Blended(Fonts_getSmall(), "Queued", COLOR_GRAY);
             if (queued_surf) {
-                SDL_Rect src = {0, 0, queued_surf->w > pos.text_max_width ? pos.text_max_width : queued_surf->w, queued_surf->h};
+                int avail_w = pos.text_max_width - subtitle_x_offset;
+                SDL_Rect src = {0, 0, queued_surf->w > avail_w ? avail_w : queued_surf->w, queued_surf->h};
                 SDL_BlitSurface(queued_surf, &src, screen,
-                                &(SDL_Rect){pos.subtitle_x, pos.subtitle_y});
+                                &(SDL_Rect){pos.subtitle_x + subtitle_x_offset, pos.subtitle_y});
                 SDL_FreeSurface(queued_surf);
             }
         } else if (has_progress && ep->duration_sec > 0) {
@@ -1230,9 +1283,10 @@ void render_podcast_episodes(SDL_Surface* screen, int show_setting,
             }
             SDL_Surface* s = TTF_RenderUTF8_Blended(Fonts_getSmall(), progress_str, COLOR_GRAY);
             if (s) {
-                SDL_Rect src = {0, 0, s->w > pos.text_max_width ? pos.text_max_width : s->w, s->h};
+                int avail_w = pos.text_max_width - subtitle_x_offset;
+                SDL_Rect src = {0, 0, s->w > avail_w ? avail_w : s->w, s->h};
                 SDL_BlitSurface(s, &src, screen,
-                                &(SDL_Rect){pos.subtitle_x, pos.subtitle_y});
+                                &(SDL_Rect){pos.subtitle_x + subtitle_x_offset, pos.subtitle_y});
                 SDL_FreeSurface(s);
             }
         } else {
@@ -1254,9 +1308,10 @@ void render_podcast_episodes(SDL_Surface* screen, int show_setting,
             if (subtitle_str[0]) {
                 SDL_Surface* sub_surf = TTF_RenderUTF8_Blended(Fonts_getSmall(), subtitle_str, COLOR_GRAY);
                 if (sub_surf) {
-                    SDL_Rect src = {0, 0, sub_surf->w > pos.text_max_width ? pos.text_max_width : sub_surf->w, sub_surf->h};
+                    int avail_w = pos.text_max_width - subtitle_x_offset;
+                    SDL_Rect src = {0, 0, sub_surf->w > avail_w ? avail_w : sub_surf->w, sub_surf->h};
                     SDL_BlitSurface(sub_surf, &src, screen,
-                                    &(SDL_Rect){pos.subtitle_x, pos.subtitle_y});
+                                    &(SDL_Rect){pos.subtitle_x + subtitle_x_offset, pos.subtitle_y});
                     SDL_FreeSurface(sub_surf);
                 }
             }
@@ -1269,12 +1324,12 @@ void render_podcast_episodes(SDL_Surface* screen, int show_setting,
     GFX_blitButtonGroup((char*[]){"START", "CONTROLS", NULL}, 0, screen, 0);
     if (selected_download_status == PODCAST_DOWNLOAD_DOWNLOADING ||
         selected_download_status == PODCAST_DOWNLOAD_PENDING) {
-        GFX_blitButtonGroup((char*[]){"B", "BACK", "A", "CANCEL", NULL}, 1, screen, 1);
+        GFX_blitButtonGroup((char*[]){"B", "BACK", "A", "CANCEL", "Y", "REFRESH", NULL}, 1, screen, 1);
     } else if (selected_is_downloaded) {
         const char* play_label = selected_is_resumable ? "RESUME" : "PLAY";
-        GFX_blitButtonGroup((char*[]){"B", "BACK", "A", (char*)play_label, "X", "PLAYED", NULL}, 1, screen, 1);
+        GFX_blitButtonGroup((char*[]){"B", "BACK", "A", (char*)play_label, "Y", "REFRESH", NULL}, 1, screen, 1);
     } else {
-        GFX_blitButtonGroup((char*[]){"B", "BACK", "A", "DOWNLOAD", "X", "PLAYED", NULL}, 1, screen, 1);
+        GFX_blitButtonGroup((char*[]){"B", "BACK", "A", "DOWNLOAD", "Y", "REFRESH", NULL}, 1, screen, 1);
     }
 
     // Toast notification

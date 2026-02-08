@@ -48,6 +48,7 @@ typedef struct {
     int progress_sec;                    // Resume position
     bool downloaded;
     char local_path[PODCAST_MAX_URL];
+    bool is_new;                         // True if episode was added by a refresh (not initial subscribe)
 } PodcastEpisode;
 
 // Podcast feed (subscription) - episodes stored separately on disk
@@ -61,6 +62,7 @@ typedef struct {
     char artwork_url[PODCAST_MAX_URL];
     int episode_count;                   // Total episodes (stored on disk)
     uint32_t last_updated;               // Unix timestamp
+    int new_episode_count;               // Count of episodes with is_new == true
 } PodcastFeed;
 
 // iTunes search result
@@ -180,6 +182,13 @@ bool Podcast_isSubscribedByItunesId(const char* itunes_id);
 
 // Refresh a feed (fetch latest episodes)
 int Podcast_refreshFeed(int index);
+
+// Background feed refresh (non-blocking)
+int Podcast_startRefreshAll(void);       // Refresh all subscriptions in background
+int Podcast_startRefreshFeed(int index); // Refresh single feed in background
+bool Podcast_isRefreshing(void);         // Check if refresh is in progress
+bool Podcast_checkRefreshCompleted(void); // Check & clear completed flag (returns true once)
+void Podcast_clearNewFlag(int feed_index, int episode_index); // Clear is_new on episode
 
 // Save/load subscriptions
 void Podcast_saveSubscriptions(void);
