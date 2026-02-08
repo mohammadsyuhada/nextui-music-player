@@ -200,6 +200,7 @@ static bool load_charts_cache(void);
 static void save_continue_listening(void);
 static void load_continue_listening(void);
 static void validate_continue_listening(void);
+static void sanitize_for_filename(char* str);
 
 
 // ============================================================================
@@ -764,11 +765,33 @@ int Podcast_subscribeFromItunes(const char* itunes_id) {
     return result;
 }
 
+// Recursively remove a directory and all its contents
+static void remove_directory_recursive(const char* path) {
+    DIR* dir = opendir(path);
+    if (!dir) return;
+
+    struct dirent* entry;
+    char filepath[512];
+    while ((entry = readdir(dir)) != NULL) {
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) continue;
+        snprintf(filepath, sizeof(filepath), "%s/%s", path, entry->d_name);
+        struct stat st;
+        if (stat(filepath, &st) == 0 && S_ISDIR(st.st_mode)) {
+            remove_directory_recursive(filepath);
+        } else {
+            unlink(filepath);
+        }
+    }
+    closedir(dir);
+    rmdir(path);
+}
+
 int Podcast_unsubscribe(int index) {
     if (index < 0 || index >= subscription_count) return -1;
 
-    // Remove continue listening entries for this feed
     const char* feed_url = subscriptions[index].feed_url;
+
+    // Remove continue listening entries for this feed
     for (int i = continue_listening_count - 1; i >= 0; i--) {
         if (strcmp(continue_listening[i].feed_url, feed_url) == 0) {
             for (int j = i; j < continue_listening_count - 1; j++) {
@@ -778,6 +801,39 @@ int Podcast_unsubscribe(int index) {
         }
     }
     save_continue_listening();
+
+    // Cancel/remove all download queue entries for this feed
+    pthread_mutex_lock(&download_mutex);
+    bool had_active_download = false;
+    int write_idx = 0;
+    for (int i = 0; i < download_queue_count; i++) {
+        if (strcmp(download_queue[i].feed_url, feed_url) == 0) {
+            if (download_queue[i].status == PODCAST_DOWNLOAD_DOWNLOADING) {
+                had_active_download = true;
+            }
+            continue;  // Skip (remove) this entry
+        }
+        if (write_idx != i) {
+            memcpy(&download_queue[write_idx], &download_queue[i], sizeof(PodcastDownloadItem));
+        }
+        write_idx++;
+    }
+    download_queue_count = write_idx;
+    if (had_active_download) {
+        download_should_stop = true;
+    }
+    pthread_mutex_unlock(&download_mutex);
+    Podcast_saveDownloadQueue();
+
+    // Delete downloaded audio files for this feed
+    char safe_feed[256];
+    strncpy(safe_feed, subscriptions[index].title, sizeof(safe_feed) - 1);
+    safe_feed[sizeof(safe_feed) - 1] = '\0';
+    sanitize_for_filename(safe_feed);
+
+    char feed_download_dir[512];
+    snprintf(feed_download_dir, sizeof(feed_download_dir), "%s/%s", download_dir, safe_feed);
+    remove_directory_recursive(feed_download_dir);
 
     pthread_mutex_lock(&subscriptions_mutex);
 
