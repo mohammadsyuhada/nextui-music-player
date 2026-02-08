@@ -1,6 +1,6 @@
 /**
  * Minimal mbedTLS configuration for HTTPS radio streaming
- * Based on mbedTLS 2.28.x
+ * Based on mbedTLS 3.6.x with TLS 1.3 support
  */
 #ifndef MBEDTLS_CONFIG_H
 #define MBEDTLS_CONFIG_H
@@ -49,6 +49,16 @@
 #define MBEDTLS_SSL_ALPN
 #define MBEDTLS_SSL_SESSION_TICKETS
 #define MBEDTLS_SSL_SERVER_NAME_INDICATION
+
+/* TLS 1.3 support */
+#define MBEDTLS_SSL_PROTO_TLS1_3
+#define MBEDTLS_SSL_TLS1_3_KEY_EXCHANGE_MODE_EPHEMERAL_ENABLED
+#define MBEDTLS_SSL_TLS1_3_COMPATIBILITY_MODE
+#define MBEDTLS_SSL_KEEP_PEER_CERTIFICATE
+
+/* PSA Crypto API (required for TLS 1.3) */
+#define MBEDTLS_PSA_CRYPTO_C
+#define MBEDTLS_HKDF_C
 
 /* mbed TLS modules */
 #define MBEDTLS_AES_C
@@ -103,7 +113,5 @@
 #undef MBEDTLS_DEBUG_C
 #undef MBEDTLS_SELF_TEST
 #undef MBEDTLS_SSL_SRV_C
-
-#include "mbedtls/check_config.h"
 
 #endif /* MBEDTLS_CONFIG_H */

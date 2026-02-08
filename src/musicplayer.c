@@ -7,6 +7,7 @@
 #include <time.h>
 #include <msettings.h>
 
+#include "psa/crypto.h"
 #include "defines.h"
 #include "api.h"
 #include "utils.h"
@@ -53,6 +54,7 @@ int main(int argc, char* argv[]) {
     PAD_init();
     PWR_init();
     WIFI_init();
+    psa_crypto_init();
 
     // Load bundled fonts
     Fonts_load();
