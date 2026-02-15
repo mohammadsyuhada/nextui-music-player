@@ -7,6 +7,7 @@
 #include "module_menu.h"
 #include "ui_main.h"
 #include "resume.h"
+#include "background.h"
 
 // Toast message state
 static char menu_toast_message[128] = "";
@@ -20,8 +21,21 @@ int MenuModule_run(SDL_Surface* screen) {
     while (1) {
         PAD_poll();
 
-        bool has_resume = Resume_isAvailable();
-        int item_count = has_resume ? 5 : 4;
+        // Handle background player updates (track advancement, resume saving)
+        Background_tick();
+        if (Background_isPlaying()) {
+            ModuleCommon_setAutosleepDisabled(true);
+        }
+
+        // Determine first item: Now Playing (if BG active) > Resume > none
+        int first_item_mode = MENU_FIRST_NONE;
+        if (Background_isPlaying()) {
+            first_item_mode = MENU_FIRST_NOW_PLAYING;
+        } else if (Resume_isAvailable()) {
+            first_item_mode = MENU_FIRST_RESUME;
+        }
+        bool has_first = (first_item_mode != MENU_FIRST_NONE);
+        int item_count = has_first ? 5 : 4;
 
         // Handle global input first (volume, START dialogs, power)
         GlobalInputResult global = ModuleCommon_handleGlobalInput(screen, &show_setting, 0);
@@ -49,16 +63,24 @@ int MenuModule_run(SDL_Surface* screen) {
             GFX_clearLayers(LAYER_SCROLLTEXT);
             // Adjust selection to match MENU_* constants
             int selection = menu_selected;
-            if (!has_resume) selection += 1;  // Skip MENU_RESUME slot
+            if (!has_first) selection += 1;  // Skip first-item slot
             return selection;
         }
         else if (PAD_justPressed(BTN_X)) {
-            // Clear resume history when X pressed on Resume item
-            if (has_resume && menu_selected == 0) {
-                Resume_clear();
-                GFX_clearLayers(LAYER_SCROLLTEXT);
-                menu_selected = 0;
-                dirty = 1;
+            if (menu_selected == 0) {
+                if (first_item_mode == MENU_FIRST_NOW_PLAYING) {
+                    // Stop background playback
+                    Background_stopAll();
+                    GFX_clearLayers(LAYER_SCROLLTEXT);
+                    menu_selected = 0;
+                    dirty = 1;
+                } else if (first_item_mode == MENU_FIRST_RESUME) {
+                    // Clear resume history
+                    Resume_clear();
+                    GFX_clearLayers(LAYER_SCROLLTEXT);
+                    menu_selected = 0;
+                    dirty = 1;
+                }
             }
         }
         else if (PAD_justPressed(BTN_B)) {
@@ -73,7 +95,7 @@ int MenuModule_run(SDL_Surface* screen) {
         // Render
         if (dirty) {
             render_menu(screen, show_setting, menu_selected,
-                        menu_toast_message, menu_toast_time, has_resume);
+                        menu_toast_message, menu_toast_time, first_item_mode);
 
             if (show_setting) {
                 GFX_blitHardwareHints(screen, show_setting);

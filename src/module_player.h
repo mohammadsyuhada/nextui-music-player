@@ -33,4 +33,7 @@ void PlayerModule_nextTrack(void);
 // Play previous track (for USB HID button support)
 void PlayerModule_prevTrack(void);
 
+// Background tick: handle track advancement and resume saving while in menu
+void PlayerModule_backgroundTick(void);
+
 #endif

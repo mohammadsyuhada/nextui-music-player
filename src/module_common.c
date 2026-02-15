@@ -12,6 +12,7 @@
 #include "player.h"
 #include "radio.h"
 #include "spectrum.h"
+#include "background.h"
 
 static bool autosleep_disabled = false;
 static uint32_t last_input_time = 0;
@@ -241,8 +242,11 @@ void ModuleCommon_setAutosleepDisabled(bool disabled) {
         PWR_disableAutosleep();
         autosleep_disabled = true;
     } else if (!disabled && autosleep_disabled) {
-        PWR_enableAutosleep();
-        autosleep_disabled = false;
+        // Don't re-enable autosleep if background audio is still playing
+        if (!Background_isPlaying()) {
+            PWR_enableAutosleep();
+            autosleep_disabled = false;
+        }
     }
 }
 

@@ -17,6 +17,7 @@
 #include "ui_main.h"
 #include "ui_utils.h"
 #include "wifi.h"
+#include "background.h"
 
 // Internal states
 typedef enum {
@@ -124,6 +125,16 @@ ModuleExitReason RadioModule_run(SDL_Surface* screen) {
     radio_toast_message[0] = '\0';
     show_confirm = false;
 
+    // Re-enter playing state if radio is playing in background
+    if (Background_getActive() == BG_RADIO && Radio_isActive()) {
+        Background_setActive(BG_NONE);
+        ModuleCommon_setAutosleepDisabled(true);
+        last_rendered_artist[0] = '\0';
+        last_rendered_title[0] = '\0';
+        last_art_was_fetching = false;
+        state = RADIO_INTERNAL_PLAYING;
+    }
+
     while (1) {
         PAD_poll();
 
@@ -208,17 +219,22 @@ ModuleExitReason RadioModule_run(SDL_Surface* screen) {
                     snprintf(radio_toast_message, sizeof(radio_toast_message), "Internet connection required");
                     radio_toast_time = SDL_GetTicks();
                     dirty = 1;
-                } else if (Radio_play(stations[radio_selected].url) == 0) {
-                    ModuleCommon_recordInputTime();
-                    last_rendered_artist[0] = '\0';
-                    last_rendered_title[0] = '\0';
-                    last_art_was_fetching = false;
-                    state = RADIO_INTERNAL_PLAYING;
-                    dirty = 1;
+                } else {
+                    Background_stopAll();
+                    if (Radio_play(stations[radio_selected].url) == 0) {
+                        ModuleCommon_recordInputTime();
+                        last_rendered_artist[0] = '\0';
+                        last_rendered_title[0] = '\0';
+                        last_art_was_fetching = false;
+                        state = RADIO_INTERNAL_PLAYING;
+                        dirty = 1;
+                    }
                 }
             }
             else if (PAD_justPressed(BTN_B)) {
-                Radio_quit();
+                if (!Radio_isActive()) {
+                    Radio_quit();
+                }
                 return MODULE_EXIT_TO_MENU;
             }
             else if (PAD_justPressed(BTN_Y)) {
@@ -297,13 +313,13 @@ ModuleExitReason RadioModule_run(SDL_Surface* screen) {
                 }
             }
             else if (PAD_justPressed(BTN_B)) {
-                // B always goes back to list (stop radio first if playing)
-                if (Radio_isActive()) {
-                    Radio_stop();
-                }
                 cleanup_album_art_background();
                 RadioStatus_clear();
-                ModuleCommon_setAutosleepDisabled(false);
+                if (Radio_isActive()) {
+                    Background_setActive(BG_RADIO);
+                } else {
+                    ModuleCommon_setAutosleepDisabled(false);
+                }
                 state = RADIO_INTERNAL_LIST;
                 dirty = 1;
             }

@@ -45,6 +45,8 @@ A comprehensive music playback application for NextUI featuring local file playb
 - Spectrum visualizer with 4 options of color to choose from.
 - Album art display (Automatically download album art if track doesn't provide)
 - Automated lyric download and display during playback
+- Search and download YouTube Music for music (Downloaded tracks will be placed in `./Music/Download`)
+- Playlist management
 
 ### Online Radio
 - Preset station management (add, remove, save)
@@ -60,19 +62,13 @@ A comprehensive music playback application for NextUI featuring local file playb
 - Download episodes for local offline playback
 - Podcast files will be placed in `./Podcasts`
 
-### Downloader
-- Search YouTube Music for music
-- Download queue management
-- Batch downloading with progress tracking
-- yt-dlp version management and updates
-- Downloaded files integrate with local music library (Downloaded tracks will be placed in `./Music/Download`)
-
 ## Controls
 
 ### Main Menu Navigation
 - **D-Pad**: Navigate menus and file browser
 - **A Button**: Select/Confirm
 - **B Button**: Back/Cancel/Exit
+- **X Button**: Clear Resume History/Background Playback
 - **Start (short press)**: Show Controls Help
 - **Start (long press)**: Exit Application
 
@@ -115,7 +111,7 @@ A comprehensive music playback application for NextUI featuring local file playb
 
 ### Online Radio
 - Navigate to the stations list using the `Online Radio` menu
-- Select from predefined list of station in the `Manage Stations` menu
+- Press `Y` button to manage stations.
 - Or add custom stations at `.userdata/shared/music-player/radio/stations.txt`
 - Metadata displays automatically when available
 
@@ -125,13 +121,6 @@ A comprehensive music playback application for NextUI featuring local file playb
 - Download any episode you wish to listen.
 - Once downloaded, it will be available to play.
 - Press `Y` button to manage subscriptions.  
-
-### Downloader
-- Navigate to the music search page using the `Downloader` menu
-- Enter search query using on-screen keyboard
-- Select tracks to add to download queue
-- Start the queue in `Download Queue` page.
-- Downloaded audio will be available in `Library` menu
 
 ## Building from Source
 
