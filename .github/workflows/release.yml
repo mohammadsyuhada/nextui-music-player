@@ -50,6 +50,7 @@ jobs:
         run: |
           VERSION=${GITHUB_REF#refs/tags/}
           gh release create "$VERSION" \
+            --repo ${{ github.repository }} \
             --title "$VERSION" \
             --generate-notes \
             "${{ github.workspace }}/NextUI/workspace/Music.Player.pak.zip"
