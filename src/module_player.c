@@ -79,7 +79,6 @@ static void init_player(void) {
 
 // Try to load and play a track, returns true on success
 static bool try_load_and_play(const char *path) {
-    Background_stopAll();
     if (Player_load(path) == 0) {
         Player_play();
         const TrackInfo* info = Player_getTrackInfo();
@@ -167,6 +166,10 @@ static bool handle_track_ended(void) {
 
 // Start playback of a track (load + play + init spectrum)
 static bool start_playback(const char* path) {
+    // Stop any other background player before starting music playback
+    if (Background_getActive() != BG_MUSIC) {
+        Background_stopAll();
+    }
     if (try_load_and_play(path)) {
         Spectrum_init();
         ModuleCommon_recordInputTime();
@@ -1069,7 +1072,7 @@ void PlayerModule_backgroundTick(void) {
 
     // Handle track ended (auto-advance)
     if (Player_getState() == PLAYER_STATE_STOPPED) {
-        if (!handle_track_ended() || Player_getState() == PLAYER_STATE_STOPPED) {
+        if (!handle_track_ended() && Player_getState() == PLAYER_STATE_STOPPED) {
             // All tracks finished
             Resume_clear();
             cleanup_playback(false);

@@ -2,6 +2,7 @@
 #include "player.h"
 #include "radio.h"
 #include "podcast.h"
+#include "resume.h"
 #include "module_player.h"
 #include "module_podcast.h"
 #include "module_common.h"
@@ -19,13 +20,19 @@ BackgroundPlayerType Background_getActive(void) {
 void Background_stopAll(void) {
     switch (active_bg) {
         case BG_MUSIC:
+            // Save resume position before stopping
+            if (Player_getState() == PLAYER_STATE_PLAYING || Player_getState() == PLAYER_STATE_PAUSED) {
+                Resume_updatePosition(Player_getPosition());
+            }
             Player_stop();
             break;
         case BG_RADIO:
             Radio_stop();
             break;
         case BG_PODCAST:
+            // Podcast_stop() saves progress in memory; flush to disk
             Podcast_stop();
+            Podcast_flushProgress();
             break;
         case BG_NONE:
             break;
