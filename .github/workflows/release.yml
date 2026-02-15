@@ -41,24 +41,15 @@ jobs:
       - name: Package release zip
         run: |
           cd ${{ github.workspace }}/NextUI/workspace/nextui-music-player
-          mkdir -p "Music Player.pak/bin/tg5040" "Music Player.pak/bin/tg5050"
-          cp launch.sh "Music Player.pak/"
-          cp pak.json "Music Player.pak/"
-          cp bin/keyboard bin/wget bin/yt-dlp "Music Player.pak/bin/"
-          cp bin/tg5040/musicplayer.elf "Music Player.pak/bin/tg5040/"
-          cp bin/tg5050/musicplayer.elf "Music Player.pak/bin/tg5050/"
-          cp -r res "Music Player.pak/"
-          cp -r state "Music Player.pak/"
-          cp -r stations "Music Player.pak/"
-          zip -r "Music.Player.pak.zip" "Music Player.pak"
+          rm -rf .github src .git .gitignore LICENSE README.md
+          zip -r ../Music.Player.pak.zip .
 
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          cd ${{ github.workspace }}/NextUI/workspace/nextui-music-player
           VERSION=${GITHUB_REF#refs/tags/}
           gh release create "$VERSION" \
             --title "$VERSION" \
             --generate-notes \
-            "Music.Player.pak.zip"
+            "${{ github.workspace }}/NextUI/workspace/Music.Player.pak.zip"
