@@ -24,12 +24,6 @@ void render_downloader_results(SDL_Surface* screen, int show_setting,
 void render_downloader_queue(SDL_Surface* screen, int show_setting,
                           int queue_selected, int* queue_scroll);
 
-// Render downloader downloading progress
-void render_downloader_downloading(SDL_Surface* screen, int show_setting);
-
-// Render downloader yt-dlp update progress
-void render_downloader_updating(SDL_Surface* screen, int show_setting);
-
 // Check if downloader results list has active scrolling (for refresh optimization)
 bool downloader_results_needs_scroll_refresh(void);
 

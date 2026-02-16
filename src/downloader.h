@@ -32,6 +32,8 @@ typedef struct {
     char title[DOWNLOADER_MAX_TITLE];
     DownloaderItemStatus status;
     int progress_percent;  // 0-100 during download
+    int speed_bps;         // Download speed in bytes/sec
+    int eta_sec;           // Estimated time remaining in seconds
 } DownloaderQueueItem;
 
 // Module states
@@ -52,6 +54,8 @@ typedef struct {
     int failed_count;            // Number failed
     char current_title[DOWNLOADER_MAX_TITLE];
     char error_message[256];
+    int speed_bps;               // Current download speed
+    int eta_sec;                 // Current ETA
 } DownloaderDownloadStatus;
 
 // Update status info
@@ -126,6 +130,9 @@ void Downloader_downloadStop(void);
 
 // Get download status
 const DownloaderDownloadStatus* Downloader_getDownloadStatus(void);
+
+// Check if download thread is running
+bool Downloader_isDownloading(void);
 
 // yt-dlp update functions
 int Downloader_checkForUpdate(void);  // Check if new version available
