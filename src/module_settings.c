@@ -5,6 +5,7 @@
 #include "ui_main.h"
 #include "settings.h"
 #include "selfupdate.h"
+#include "downloader.h"
 #include "ui_settings.h"
 #include "ui_system.h"
 #include "wifi.h"
@@ -15,7 +16,8 @@ typedef enum {
     SETTINGS_STATE_MENU,
     SETTINGS_STATE_CLEAR_CACHE_CONFIRM,
     SETTINGS_STATE_ABOUT,
-    SETTINGS_STATE_UPDATING
+    SETTINGS_STATE_UPDATING,
+    SETTINGS_STATE_UPDATING_YTDLP
 } SettingsState;
 
 // Settings menu items
@@ -23,8 +25,9 @@ typedef enum {
 #define SETTINGS_ITEM_BASS_FILTER   1
 #define SETTINGS_ITEM_SOFT_LIMITER  2
 #define SETTINGS_ITEM_CLEAR_CACHE   3
-#define SETTINGS_ITEM_ABOUT         4
-#define SETTINGS_ITEM_COUNT         5
+#define SETTINGS_ITEM_UPDATE_YTDLP  4
+#define SETTINGS_ITEM_ABOUT         5
+#define SETTINGS_ITEM_COUNT         6
 
 // Internal app state constants for controls help
 // These match the pattern used in ui_main.c
@@ -113,6 +116,13 @@ ModuleExitReason SettingsModule_run(SDL_Surface* screen) {
                             state = SETTINGS_STATE_CLEAR_CACHE_CONFIRM;
                             dirty = 1;
                             break;
+                        case SETTINGS_ITEM_UPDATE_YTDLP:
+                            if (Downloader_init() == 0 && Wifi_ensureConnected(screen, show_setting)) {
+                                Downloader_startUpdate();
+                                state = SETTINGS_STATE_UPDATING_YTDLP;
+                            }
+                            dirty = 1;
+                            break;
                         case SETTINGS_ITEM_ABOUT:
                             state = SETTINGS_STATE_ABOUT;
                             dirty = 1;
@@ -193,6 +203,24 @@ ModuleExitReason SettingsModule_run(SDL_Surface* screen) {
                 // Always redraw during update
                 dirty = 1;
                 break;
+
+            case SETTINGS_STATE_UPDATING_YTDLP:
+                Downloader_update();
+                const DownloaderUpdateStatus* ytdlp_status = Downloader_getUpdateStatus();
+
+                if (!ytdlp_status->updating) {
+                    state = SETTINGS_STATE_MENU;
+                }
+
+                if (PAD_justPressed(BTN_B)) {
+                    if (ytdlp_status->updating) {
+                        Downloader_cancelUpdate();
+                    }
+                    state = SETTINGS_STATE_MENU;
+                }
+
+                dirty = 1;
+                break;
         }
 
         // Handle power management
@@ -213,6 +241,9 @@ ModuleExitReason SettingsModule_run(SDL_Surface* screen) {
                     break;
                 case SETTINGS_STATE_UPDATING:
                     render_app_updating(screen, show_setting);
+                    break;
+                case SETTINGS_STATE_UPDATING_YTDLP:
+                    render_ytdlp_updating(screen, show_setting);
                     break;
             }
 

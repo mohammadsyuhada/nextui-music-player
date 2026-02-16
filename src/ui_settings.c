@@ -9,14 +9,16 @@
 #include "settings.h"
 #include "album_art.h"
 #include "selfupdate.h"
+#include "downloader.h"
 
 // Settings menu items
 #define SETTINGS_ITEM_SCREEN_OFF    0
 #define SETTINGS_ITEM_BASS_FILTER   1
 #define SETTINGS_ITEM_SOFT_LIMITER  2
 #define SETTINGS_ITEM_CLEAR_CACHE   3
-#define SETTINGS_ITEM_ABOUT         4
-#define SETTINGS_ITEM_COUNT         5
+#define SETTINGS_ITEM_UPDATE_YTDLP  4
+#define SETTINGS_ITEM_ABOUT         5
+#define SETTINGS_ITEM_COUNT         6
 
 // Format cache size as human-readable string
 static void format_cache_size(long bytes, char* buf, int buf_size) {
@@ -37,15 +39,18 @@ void render_settings_menu(SDL_Surface* screen, int show_setting, int menu_select
     render_screen_header(screen, "Settings", show_setting);
     ListLayout layout = calc_list_layout(screen);
 
+    // Vertically center items in available area
+    int item_h = SCALE1(PILL_SIZE);
+    int total_items_h = SETTINGS_ITEM_COUNT * item_h;
+    int start_y = layout.list_y + (layout.list_h - total_items_h) / 8;
+
     char truncated[256];
     char label_buffer[256];
 
     for (int i = 0; i < SETTINGS_ITEM_COUNT; i++) {
         bool selected = (i == menu_selected);
 
-        // Menu items have small spacing between them
-        int item_h = SCALE1(PILL_SIZE + 2);
-        int item_y = layout.list_y + i * item_h;
+        int item_y = start_y + i * item_h;
 
         // Build label text based on item
         const char* label = "";
@@ -72,6 +77,9 @@ void render_settings_menu(SDL_Surface* screen, int show_setting, int menu_select
                 label = label_buffer;
                 break;
             }
+            case SETTINGS_ITEM_UPDATE_YTDLP:
+                label = "Update yt-dlp";
+                break;
             case SETTINGS_ITEM_ABOUT: {
                 const SelfUpdateStatus* status = SelfUpdate_getStatus();
                 if (status->update_available) {
@@ -176,6 +184,107 @@ void render_settings_menu(SDL_Surface* screen, int show_setting, int menu_select
         GFX_blitButtonGroup((char*[]){"B", "BACK", "LEFT/RIGHT", "CHANGE", NULL}, 1, screen, 1);
     } else {
         GFX_blitButtonGroup((char*[]){"B", "BACK", "A", "OPEN", NULL}, 1, screen, 1);
+    }
+}
+
+void render_ytdlp_updating(SDL_Surface* screen, int show_setting) {
+    GFX_clear(screen);
+
+    int hw = screen->w;
+    int hh = screen->h;
+
+    render_screen_header(screen, "Updating yt-dlp", show_setting);
+
+    const DownloaderUpdateStatus* status = Downloader_getUpdateStatus();
+
+    // Current version
+    char ver_str[128];
+    snprintf(ver_str, sizeof(ver_str), "Current: %s", status->current_version);
+    SDL_Surface* ver_text = TTF_RenderUTF8_Blended(Fonts_getMedium(), ver_str, COLOR_GRAY);
+    if (ver_text) {
+        SDL_BlitSurface(ver_text, NULL, screen, &(SDL_Rect){(hw - ver_text->w) / 2, hh / 2 - SCALE1(50)});
+        SDL_FreeSurface(ver_text);
+    }
+
+    // Status message
+    const char* status_msg = "Checking connection...";
+    if (status->progress_percent >= 15 && status->progress_percent < 30) {
+        status_msg = "Fetching version info...";
+    } else if (status->progress_percent >= 30 && status->progress_percent < 50) {
+        status_msg = "Checking for updates...";
+    } else if (status->progress_percent >= 50 && status->progress_percent < 80) {
+        status_msg = "Downloading yt-dlp...";
+    } else if (status->progress_percent >= 80 && status->progress_percent < 100) {
+        status_msg = "Installing update...";
+    } else if (!status->updating && !status->update_available && status->progress_percent >= 100) {
+        status_msg = "Already up to date!";
+    } else if (status->progress_percent >= 100) {
+        status_msg = "Update complete!";
+    } else if (!status->updating && strlen(status->error_message) > 0) {
+        status_msg = status->error_message;
+    }
+
+    SDL_Surface* status_text = TTF_RenderUTF8_Blended(Fonts_getMedium(), status_msg, COLOR_WHITE);
+    if (status_text) {
+        SDL_BlitSurface(status_text, NULL, screen, &(SDL_Rect){(hw - status_text->w) / 2, hh / 2});
+        SDL_FreeSurface(status_text);
+    }
+
+    // Latest version (if known)
+    if (strlen(status->latest_version) > 0) {
+        snprintf(ver_str, sizeof(ver_str), "Latest: %s", status->latest_version);
+        SDL_Surface* latest_text = TTF_RenderUTF8_Blended(Fonts_getSmall(), ver_str, COLOR_GRAY);
+        if (latest_text) {
+            SDL_BlitSurface(latest_text, NULL, screen, &(SDL_Rect){(hw - latest_text->w) / 2, hh / 2 + SCALE1(30)});
+            SDL_FreeSurface(latest_text);
+        }
+    }
+
+    // Progress bar
+    if (status->updating) {
+        int bar_w = hw - SCALE1(PADDING * 8);
+        int bar_h = SCALE1(12);
+        int bar_x = SCALE1(PADDING * 4);
+        int bar_y = hh / 2 + SCALE1(55);
+
+        // Background
+        SDL_Rect bg_rect = {bar_x, bar_y, bar_w, bar_h};
+        SDL_FillRect(screen, &bg_rect, SDL_MapRGB(screen->format, 64, 64, 64));
+
+        // Progress fill
+        int prog_w = (bar_w * status->progress_percent) / 100;
+        if (prog_w > 0) {
+            SDL_Rect prog_rect = {bar_x, bar_y, prog_w, bar_h};
+            SDL_FillRect(screen, &prog_rect, SDL_MapRGB(screen->format, 100, 200, 100));
+        }
+
+        // Download detail text
+        if (strlen(status->status_detail) > 0) {
+            SDL_Surface* detail_text = TTF_RenderUTF8_Blended(Fonts_getSmall(), status->status_detail, COLOR_GRAY);
+            if (detail_text) {
+                SDL_BlitSurface(detail_text, NULL, screen, &(SDL_Rect){(hw - detail_text->w) / 2, bar_y + bar_h + SCALE1(6)});
+                SDL_FreeSurface(detail_text);
+            }
+        }
+
+        // Percentage text
+        char pct_str[16];
+        snprintf(pct_str, sizeof(pct_str), "%d%%", status->progress_percent);
+        SDL_Surface* pct_text = TTF_RenderUTF8_Blended(Fonts_getTiny(), pct_str, COLOR_WHITE);
+        if (pct_text) {
+            int pct_x = bar_x + (bar_w - pct_text->w) / 2;
+            int pct_y = bar_y + (bar_h - pct_text->h) / 2;
+            SDL_BlitSurface(pct_text, NULL, screen, &(SDL_Rect){pct_x, pct_y});
+            SDL_FreeSurface(pct_text);
+        }
+    }
+
+    // Button hints
+    GFX_blitButtonGroup((char*[]){"START", "CONTROLS", NULL}, 0, screen, 0);
+    if (status->updating) {
+        GFX_blitButtonGroup((char*[]){"B", "CANCEL", NULL}, 1, screen, 1);
+    } else {
+        GFX_blitButtonGroup((char*[]){"B", "BACK", NULL}, 1, screen, 1);
     }
 }
 
