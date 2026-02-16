@@ -123,10 +123,15 @@ typedef struct {
 // Render a list item's pill with optional right-side badge area (settings-style two-layer)
 // When badge_width > 0 and selected: THEME_COLOR2 outer pill + THEME_COLOR1 inner title pill
 // When badge_width == 0: behaves like render_list_item_pill
+// Pill width considers both title and subtitle (whichever is wider)
+// subtitle can be NULL if not needed for pill sizing
+// extra_subtitle_width: additional width to add to subtitle measurement (e.g. progress bar)
 // Caller renders badge content at badge_x, badge_y
 ListItemBadgedPos render_list_item_pill_badged(SDL_Surface* screen, ListLayout* layout,
-                                                const char* text, char* truncated,
-                                                int y, bool selected, int badge_width);
+                                                const char* text, const char* subtitle,
+                                                char* truncated,
+                                                int y, bool selected, int badge_width,
+                                                int extra_subtitle_width);
 
 // Position information returned by render_list_item_pill_rich
 typedef struct {

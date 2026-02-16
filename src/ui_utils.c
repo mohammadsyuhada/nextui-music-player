@@ -402,8 +402,10 @@ ListItemPos render_list_item_pill(SDL_Surface* screen, ListLayout* layout,
 // When badge_width > 0 and selected: THEME_COLOR2 outer capsule + THEME_COLOR1 inner capsule
 // When badge_width == 0: single THEME_COLOR1 capsule
 ListItemBadgedPos render_list_item_pill_badged(SDL_Surface* screen, ListLayout* layout,
-                                                const char* text, char* truncated,
-                                                int y, bool selected, int badge_width) {
+                                                const char* text, const char* subtitle,
+                                                char* truncated,
+                                                int y, bool selected, int badge_width,
+                                                int extra_subtitle_width) {
     ListItemBadgedPos pos;
 
     int item_h = SCALE1(PILL_SIZE) * 3 / 2;
@@ -414,6 +416,16 @@ ListItemBadgedPos render_list_item_pill_badged(SDL_Surface* screen, ListLayout* 
     // Calculate title pill width (reduced max to leave room for badge area)
     int title_max_width = layout->max_width - badge_area_w;
     pos.pill_width = Fonts_calcListPillWidth(Fonts_getMedium(), text, truncated, title_max_width, 0);
+
+    // Expand pill if subtitle is wider than title
+    if (subtitle && subtitle[0]) {
+        int sub_w;
+        TTF_SizeUTF8(Fonts_getSmall(), subtitle, &sub_w, NULL);
+        sub_w += extra_subtitle_width;
+        int sub_pill_w = MIN(title_max_width, sub_w + SCALE1(BUTTON_PADDING * 2));
+        if (sub_pill_w > pos.pill_width)
+            pos.pill_width = sub_pill_w;
+    }
 
     if (selected) {
         int px = SCALE1(PADDING);
