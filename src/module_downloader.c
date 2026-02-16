@@ -12,16 +12,14 @@
 #include "wifi.h"
 
 // Menu count
-#define DOWNLOADER_MENU_COUNT 3
+#define DOWNLOADER_MENU_COUNT 2
 
 // Internal states
 typedef enum {
     DOWNLOADER_INTERNAL_MENU,
     DOWNLOADER_INTERNAL_SEARCHING,
     DOWNLOADER_INTERNAL_RESULTS,
-    DOWNLOADER_INTERNAL_QUEUE,
-    DOWNLOADER_INTERNAL_DOWNLOADING,
-    DOWNLOADER_INTERNAL_UPDATING
+    DOWNLOADER_INTERNAL_QUEUE
 } DownloaderInternalState;
 
 // Module state
@@ -64,6 +62,13 @@ ModuleExitReason DownloaderModule_run(SDL_Surface* screen) {
     result_count = 0;
     toast_message[0] = '\0';
 
+    // If re-entering while download is running, go straight to queue
+    if (Downloader_isDownloading()) {
+        queue_selected = 0;
+        queue_scroll = 0;
+        state = DOWNLOADER_INTERNAL_QUEUE;
+    }
+
     while (1) {
         PAD_poll();
 
@@ -74,9 +79,6 @@ ModuleExitReason DownloaderModule_run(SDL_Surface* screen) {
             case DOWNLOADER_INTERNAL_SEARCHING: app_state_for_help = 29; break;
             case DOWNLOADER_INTERNAL_RESULTS: app_state_for_help = 30; break;
             case DOWNLOADER_INTERNAL_QUEUE: app_state_for_help = 31; break;
-            case DOWNLOADER_INTERNAL_DOWNLOADING: app_state_for_help = 32; break;
-            case DOWNLOADER_INTERNAL_UPDATING: app_state_for_help = 33; break;
-            default: app_state_for_help = 28; break;
         }
 
         GlobalInputResult global = ModuleCommon_handleGlobalInput(screen, &show_setting, app_state_for_help);
@@ -128,15 +130,15 @@ ModuleExitReason DownloaderModule_run(SDL_Surface* screen) {
                     queue_scroll = 0;
                     state = DOWNLOADER_INTERNAL_QUEUE;
                     dirty = 1;
-                } else if (menu_selected == 2) {
-                    // Update yt-dlp
-                    Downloader_startUpdate();
-                    state = DOWNLOADER_INTERNAL_UPDATING;
-                    dirty = 1;
                 }
             }
             else if (PAD_justPressed(BTN_B)) {
-                Downloader_cleanup();
+                if (Downloader_isDownloading()) {
+                    // Keep download running in background
+                    Downloader_saveQueue();
+                } else {
+                    Downloader_cleanup();
+                }
                 return MODULE_EXIT_TO_MENU;
             }
         }
@@ -190,15 +192,16 @@ ModuleExitReason DownloaderModule_run(SDL_Surface* screen) {
             else if (PAD_justPressed(BTN_A) && result_count > 0 && results_selected >= 0) {
                 DownloaderResult* r = &results[results_selected];
                 if (Downloader_isInQueue(r->video_id)) {
-                    if (Downloader_queueRemoveById(r->video_id) == 0) {
-                        snprintf(toast_message, sizeof(toast_message), "Removed from queue");
-                    } else {
-                        snprintf(toast_message, sizeof(toast_message), "Failed to remove");
-                    }
+                    snprintf(toast_message, sizeof(toast_message), "Already in queue");
                 } else {
                     int added = Downloader_queueAdd(r->video_id, r->title);
                     if (added == 1) {
-                        snprintf(toast_message, sizeof(toast_message), "Added to queue!");
+                        // queueAdd auto-starts download thread
+                        if (Downloader_isDownloading()) {
+                            snprintf(toast_message, sizeof(toast_message), "Added to queue");
+                        } else {
+                            snprintf(toast_message, sizeof(toast_message), "Downloading...");
+                        }
                     } else if (added == -1) {
                         snprintf(toast_message, sizeof(toast_message), "Queue is full");
                     }
@@ -234,11 +237,7 @@ ModuleExitReason DownloaderModule_run(SDL_Surface* screen) {
                 dirty = 1;
             }
             else if (PAD_justPressed(BTN_A) && qcount > 0) {
-                if (Downloader_downloadStart() == 0) {
-                    downloader_queue_clear_scroll();
-                    state = DOWNLOADER_INTERNAL_DOWNLOADING;
-                }
-                dirty = 1;
+                // Queue is now a monitoring page — downloads auto-start from search
             }
             else if (PAD_justPressed(BTN_X) && qcount > 0) {
                 Downloader_queueRemove(queue_selected);
@@ -259,47 +258,10 @@ ModuleExitReason DownloaderModule_run(SDL_Surface* screen) {
             }
             if (downloader_queue_scroll_needs_render()) dirty = 1;
         }
-        // =========================================
-        // DOWNLOADING STATE
-        // =========================================
-        else if (state == DOWNLOADER_INTERNAL_DOWNLOADING) {
-            Downloader_update();
-            const DownloaderDownloadStatus* status = Downloader_getDownloadStatus();
-
-            if (status->state != DOWNLOADER_STATE_DOWNLOADING) {
-                downloader_queue_clear_scroll();
-                state = DOWNLOADER_INTERNAL_QUEUE;
-            }
-
-            if (PAD_justPressed(BTN_B)) {
-                Downloader_downloadStop();
-                downloader_queue_clear_scroll();
-                state = DOWNLOADER_INTERNAL_QUEUE;
-            }
-
-            dirty = 1;  // Always redraw for progress
+        // Keep refreshing while download is active (for progress updates)
+        if (state == DOWNLOADER_INTERNAL_QUEUE && Downloader_isDownloading()) {
+            dirty = 1;
         }
-        // =========================================
-        // UPDATING STATE
-        // =========================================
-        else if (state == DOWNLOADER_INTERNAL_UPDATING) {
-            Downloader_update();
-            const DownloaderUpdateStatus* status = Downloader_getUpdateStatus();
-
-            if (!status->updating) {
-                state = DOWNLOADER_INTERNAL_MENU;
-            }
-
-            if (PAD_justPressed(BTN_B)) {
-                if (status->updating) {
-                    Downloader_cancelUpdate();
-                }
-                state = DOWNLOADER_INTERNAL_MENU;
-            }
-
-            dirty = 1;  // Always redraw for progress
-        }
-
         // Handle power management
         ModuleCommon_PWR_update(&dirty, &show_setting);
 
@@ -318,12 +280,6 @@ ModuleExitReason DownloaderModule_run(SDL_Surface* screen) {
                     break;
                 case DOWNLOADER_INTERNAL_QUEUE:
                     render_downloader_queue(screen, show_setting, queue_selected, &queue_scroll);
-                    break;
-                case DOWNLOADER_INTERNAL_DOWNLOADING:
-                    render_downloader_downloading(screen, show_setting);
-                    break;
-                case DOWNLOADER_INTERNAL_UPDATING:
-                    render_downloader_updating(screen, show_setting);
                     break;
             }
 
