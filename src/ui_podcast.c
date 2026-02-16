@@ -191,6 +191,7 @@ static SDL_Surface* load_circular_thumbnail_from_surface(SDL_Surface* raw, int s
 }
 
 // Load image file from disk path, scale to size x size, apply circular mask
+// Deletes corrupt/incomplete files so they get re-fetched
 static SDL_Surface* load_circular_thumbnail(const char* path, int size) {
     FILE* f = fopen(path, "rb");
     if (!f) return NULL;
@@ -205,11 +206,18 @@ static SDL_Surface* load_circular_thumbnail(const char* path, int size) {
     if ((long)fread(data, 1, fsize, f) != fsize) { free(data); fclose(f); return NULL; }
     fclose(f);
 
+    // Validate image completeness
+    if (!is_image_complete(data, fsize)) {
+        free(data);
+        remove(path);  // Delete corrupt file so it gets re-fetched
+        return NULL;
+    }
+
     SDL_RWops* rw = SDL_RWFromConstMem(data, fsize);
     SDL_Surface* raw = NULL;
     if (rw) raw = IMG_Load_RW(rw, 1);
     free(data);
-    if (!raw) return NULL;
+    if (!raw) { remove(path); return NULL; }
 
     SDL_Surface* result = load_circular_thumbnail_from_surface(raw, size);
     SDL_FreeSurface(raw);
@@ -367,6 +375,7 @@ static char episode_header_feed_id[17] = {0};
 static int episode_header_art_size = 0;
 
 // Load image file, scale to size x size, apply rounded corner mask
+// Deletes corrupt/incomplete files so they get re-fetched
 static SDL_Surface* load_rounded_thumbnail(const char* path, int size, int radius) {
     FILE* f = fopen(path, "rb");
     if (!f) return NULL;
@@ -381,11 +390,18 @@ static SDL_Surface* load_rounded_thumbnail(const char* path, int size, int radiu
     if ((long)fread(data, 1, fsize, f) != fsize) { free(data); fclose(f); return NULL; }
     fclose(f);
 
+    // Validate image completeness
+    if (!is_image_complete(data, fsize)) {
+        free(data);
+        remove(path);
+        return NULL;
+    }
+
     SDL_RWops* rw = SDL_RWFromConstMem(data, fsize);
     SDL_Surface* raw = NULL;
     if (rw) raw = IMG_Load_RW(rw, 1);
     free(data);
-    if (!raw) return NULL;
+    if (!raw) { remove(path); return NULL; }
 
     SDL_Surface* converted = SDL_ConvertSurfaceFormat(raw, SDL_PIXELFORMAT_ARGB8888, 0);
     SDL_FreeSurface(raw);
@@ -571,7 +587,11 @@ void render_podcast_main_page(SDL_Surface* screen, int show_setting,
     int cl_count_raw = Podcast_getContinueListeningCount();
     int cl_count = (cl_count_raw > PODCAST_CONTINUE_LISTENING_DISPLAY) ? PODCAST_CONTINUE_LISTENING_DISPLAY : cl_count_raw;
     int sub_count = Podcast_getSubscriptionCount();
-    int total = cl_count + sub_count;
+    // "Downloads" menu item at the bottom (only when queue is non-empty)
+    int dl_queue_count = 0;
+    Podcast_getDownloadQueue(&dl_queue_count);
+    int has_downloads_item = (dl_queue_count > 0) ? 1 : 0;
+    int total = cl_count + sub_count + has_downloads_item;
 
     // Empty state
     if (total == 0) {
@@ -616,6 +636,13 @@ void render_podcast_main_page(SDL_Surface* screen, int show_setting,
             item_y[cl_count + i] = content_y;
             content_y += sub_item_h;
         }
+    }
+
+    // Downloads item (at the bottom)
+    if (has_downloads_item) {
+        if (cl_count > 0 || sub_count > 0) content_y += SCALE1(18);  // Gap
+        item_y[cl_count + sub_count] = content_y;
+        content_y += sub_item_h;
     }
 
     int total_content_h = content_y;
@@ -734,11 +761,43 @@ void render_podcast_main_page(SDL_Surface* screen, int show_setting,
         }
     }
 
+    // --- Downloads item ---
+    if (has_downloads_item) {
+        if (cl_count > 0 || sub_count > 0) cy += SCALE1(18);  // Gap
+        int dl_idx = cl_count + sub_count;
+        bool dl_selected = (dl_idx == selected);
+        int y = draw_offset + cy;
+
+        if (y + sub_item_h > base_y && y < base_y + viewport_h) {
+            char dl_subtitle[64];
+            snprintf(dl_subtitle, sizeof(dl_subtitle), "%d Episode%s", dl_queue_count, dl_queue_count != 1 ? "s" : "");
+
+            char truncated_dl[256];
+            ListItemBadgedPos pos = render_list_item_pill_badged(screen, &pill_layout, "Downloads", dl_subtitle, truncated_dl, y, dl_selected, 0, 0);
+
+            render_list_item_text(screen, dl_selected ? &podcast_title_scroll : NULL,
+                                  "Downloads", Fonts_getMedium(),
+                                  pos.text_x, pos.text_y, pos.text_max_width, dl_selected);
+
+            SDL_Surface* sub_surf = TTF_RenderUTF8_Blended(Fonts_getSmall(), dl_subtitle, COLOR_GRAY);
+            if (sub_surf) {
+                int avail_w = pos.text_max_width;
+                SDL_Rect src = {0, 0, sub_surf->w > avail_w ? avail_w : sub_surf->w, sub_surf->h};
+                SDL_BlitSurface(sub_surf, &src, screen, &(SDL_Rect){pos.subtitle_x, pos.subtitle_y});
+                SDL_FreeSurface(sub_surf);
+            }
+        }
+        cy += sub_item_h;
+    }
+
     SDL_SetClipRect(screen, NULL);
 
     // Button hints — context dependent
     GFX_blitButtonGroup((char*[]){"START", "CONTROLS", NULL}, 0, screen, 0);
-    if (selected < cl_count) {
+    if (has_downloads_item && selected == cl_count + sub_count) {
+        // Downloads item selected
+        GFX_blitButtonGroup((char*[]){"B", "BACK", "A", "OPEN", "Y", "MANAGE", NULL}, 1, screen, 1);
+    } else if (selected < cl_count) {
         // Continue listening item selected
         GFX_blitButtonGroup((char*[]){"B", "BACK", "A", "PLAY", "Y", "MANAGE", NULL}, 1, screen, 1);
     } else {
@@ -1201,7 +1260,7 @@ void render_podcast_episodes(SDL_Surface* screen, int show_setting,
         int badge_width = num_badges > 0 ? num_badges * badge_icon_size : 0;
 
         // Two-layer capsule pill with subtitle inside
-        ListItemBadgedPos pos = render_list_item_pill_badged(screen, &layout, ep->title, truncated, y, is_selected, badge_width);
+        ListItemBadgedPos pos = render_list_item_pill_badged(screen, &layout, ep->title, NULL, truncated, y, is_selected, badge_width, 0);
 
         // Title text (row 1)
         render_list_item_text(screen, is_selected ? &podcast_title_scroll : NULL,
@@ -1334,6 +1393,196 @@ void render_podcast_episodes(SDL_Surface* screen, int show_setting,
         GFX_blitButtonGroup((char*[]){"B", "BACK", "A", (char*)play_label, "Y", "REFRESH", NULL}, 1, screen, 1);
     } else {
         GFX_blitButtonGroup((char*[]){"B", "BACK", "A", "DOWNLOAD", "Y", "REFRESH", NULL}, 1, screen, 1);
+    }
+
+    // Toast notification
+    render_toast(screen, toast_message, toast_time);
+}
+
+// Format download speed for display
+static void format_speed(char* buf, int buf_size, int bytes_per_sec) {
+    if (bytes_per_sec <= 0) {
+        snprintf(buf, buf_size, "0 B/s");
+    } else if (bytes_per_sec < 1024) {
+        snprintf(buf, buf_size, "%d B/s", bytes_per_sec);
+    } else if (bytes_per_sec < 1024 * 1024) {
+        snprintf(buf, buf_size, "%.1f KB/s", bytes_per_sec / 1024.0);
+    } else {
+        snprintf(buf, buf_size, "%.1f MB/s", bytes_per_sec / (1024.0 * 1024.0));
+    }
+}
+
+// Format ETA for display
+static void format_eta(char* buf, int buf_size, int seconds) {
+    if (seconds <= 0) {
+        buf[0] = '\0';
+    } else if (seconds < 60) {
+        snprintf(buf, buf_size, "%ds", seconds);
+    } else if (seconds < 3600) {
+        snprintf(buf, buf_size, "%dm%ds", seconds / 60, seconds % 60);
+    } else {
+        snprintf(buf, buf_size, "%dh%dm", seconds / 3600, (seconds % 3600) / 60);
+    }
+}
+
+// Render download queue view
+void render_podcast_download_queue(SDL_Surface* screen, int show_setting,
+                                    int selected, int* scroll,
+                                    const char* toast_message, uint32_t toast_time) {
+    GFX_clear(screen);
+
+    int hw = screen->w;
+    char truncated[256];
+
+    int queue_count = 0;
+    PodcastDownloadItem* queue = Podcast_getDownloadQueue(&queue_count);
+    const PodcastDownloadProgress* progress = Podcast_getDownloadProgress();
+
+    // Title with completion count
+    char title[64];
+    if (queue_count > 0) {
+        snprintf(title, sizeof(title), "Downloads (%d/%d)",
+                 progress->completed_count, progress->total_items);
+    } else {
+        snprintf(title, sizeof(title), "Downloads");
+    }
+    render_screen_header(screen, title, show_setting);
+
+    // Empty state
+    if (queue_count == 0) {
+        int center_y = screen->h / 2;
+        const char* msg = "No downloads";
+        SDL_Surface* text = TTF_RenderUTF8_Blended(Fonts_getMedium(), msg, COLOR_WHITE);
+        if (text) {
+            SDL_BlitSurface(text, NULL, screen, &(SDL_Rect){(hw - text->w) / 2, center_y - text->h / 2});
+            SDL_FreeSurface(text);
+        }
+        GFX_blitButtonGroup((char*[]){"B", "BACK", NULL}, 1, screen, 1);
+        render_toast(screen, toast_message, toast_time);
+        return;
+    }
+
+    // List layout — use taller item height for two-row pills (title + subtitle)
+    ListLayout layout = calc_list_layout(screen);
+    layout.item_h = SCALE1(PILL_SIZE) * 3 / 2;
+    layout.items_per_page = layout.list_h / layout.item_h;
+    if (layout.items_per_page > 5) layout.items_per_page = 5;
+    adjust_list_scroll(selected, scroll, layout.items_per_page);
+
+    for (int i = 0; i < layout.items_per_page && *scroll + i < queue_count; i++) {
+        int idx = *scroll + i;
+        PodcastDownloadItem* item = &queue[idx];
+        bool is_selected = (idx == selected);
+
+        int y = layout.list_y + i * layout.item_h;
+
+        // Two-layer pill with subtitle
+        int badge_width = 0;
+        ListItemBadgedPos pos = render_list_item_pill_badged(screen, &layout, item->episode_title, item->feed_title, truncated, y, is_selected, badge_width, 0);
+
+        // Title text (row 1)
+        render_list_item_text(screen, is_selected ? &podcast_title_scroll : NULL,
+                              item->episode_title, Fonts_getMedium(),
+                              pos.text_x, pos.text_y,
+                              pos.text_max_width, is_selected);
+
+        // Subtitle (row 2) — status-dependent
+        int small_h = TTF_FontHeight(Fonts_getSmall());
+        (void)small_h;
+
+        if (item->status == PODCAST_DOWNLOAD_DOWNLOADING) {
+            // Progress bar + speed + ETA
+            int bar_w = SCALE1(50);
+            int bar_h = SCALE1(4);
+            int bar_x = pos.subtitle_x;
+            int bar_y = pos.subtitle_y + (TTF_FontHeight(Fonts_getSmall()) - bar_h) / 2;
+
+            // Bar background
+            SDL_Rect bar_bg = {bar_x, bar_y, bar_w, bar_h};
+            SDL_FillRect(screen, &bar_bg, SDL_MapRGB(screen->format, 60, 60, 60));
+
+            // Bar fill
+            int fill_w = (bar_w * item->progress_percent) / 100;
+            if (fill_w > 0) {
+                SDL_Rect bar_fill = {bar_x, bar_y, fill_w, bar_h};
+                SDL_FillRect(screen, &bar_fill, THEME_COLOR2);
+            }
+
+            // Speed and ETA text after bar
+            char info_str[64];
+            char speed_str[32];
+            char eta_str[32];
+            format_speed(speed_str, sizeof(speed_str), progress->speed_bps);
+            format_eta(eta_str, sizeof(eta_str), progress->eta_sec);
+
+            if (eta_str[0]) {
+                snprintf(info_str, sizeof(info_str), "%d%%  %s  ETA %s",
+                         item->progress_percent, speed_str, eta_str);
+            } else {
+                snprintf(info_str, sizeof(info_str), "%d%%  %s",
+                         item->progress_percent, speed_str);
+            }
+
+            SDL_Surface* info_surf = TTF_RenderUTF8_Blended(Fonts_getSmall(), info_str, COLOR_GRAY);
+            if (info_surf) {
+                int info_x = bar_x + bar_w + SCALE1(6);
+                int avail_w = pos.text_max_width - bar_w - SCALE1(6);
+                SDL_Rect src = {0, 0, info_surf->w > avail_w ? avail_w : info_surf->w, info_surf->h};
+                SDL_BlitSurface(info_surf, &src, screen,
+                                &(SDL_Rect){info_x, pos.subtitle_y});
+                SDL_FreeSurface(info_surf);
+            }
+        } else if (item->status == PODCAST_DOWNLOAD_PENDING) {
+            const char* label = "Queued";
+            SDL_Surface* s = TTF_RenderUTF8_Blended(Fonts_getSmall(), label, COLOR_GRAY);
+            if (s) {
+                SDL_BlitSurface(s, NULL, screen, &(SDL_Rect){pos.subtitle_x, pos.subtitle_y});
+                SDL_FreeSurface(s);
+            }
+        } else if (item->status == PODCAST_DOWNLOAD_FAILED) {
+            const char* label = "[Failed]";
+            if (item->retry_count > 0) {
+                char fail_str[64];
+                snprintf(fail_str, sizeof(fail_str), "[Failed after %d retries]", item->retry_count);
+                SDL_Surface* s = TTF_RenderUTF8_Blended(Fonts_getSmall(), fail_str, (SDL_Color){200, 80, 80, 255});
+                if (s) {
+                    int avail_w = pos.text_max_width;
+                    SDL_Rect src = {0, 0, s->w > avail_w ? avail_w : s->w, s->h};
+                    SDL_BlitSurface(s, &src, screen, &(SDL_Rect){pos.subtitle_x, pos.subtitle_y});
+                    SDL_FreeSurface(s);
+                }
+            } else {
+                SDL_Surface* s = TTF_RenderUTF8_Blended(Fonts_getSmall(), label, (SDL_Color){200, 80, 80, 255});
+                if (s) {
+                    SDL_BlitSurface(s, NULL, screen, &(SDL_Rect){pos.subtitle_x, pos.subtitle_y});
+                    SDL_FreeSurface(s);
+                }
+            }
+        } else if (item->status == PODCAST_DOWNLOAD_COMPLETE) {
+            const char* label = "Complete";
+            SDL_Surface* s = TTF_RenderUTF8_Blended(Fonts_getSmall(), label, (SDL_Color){80, 200, 80, 255});
+            if (s) {
+                SDL_BlitSurface(s, NULL, screen, &(SDL_Rect){pos.subtitle_x, pos.subtitle_y});
+                SDL_FreeSurface(s);
+            }
+        }
+
+        // Feed title as secondary info (tiny font, below subtitle)
+        if (item->feed_title[0]) {
+            GFX_truncateText(Fonts_getTiny(), item->feed_title, truncated, pos.text_max_width, 0);
+            // Render as part of subtitle line if space allows
+        }
+    }
+
+    // Scroll indicators
+    render_scroll_indicators(screen, *scroll, layout.items_per_page, queue_count);
+
+    // Button hints
+    GFX_blitButtonGroup((char*[]){"START", "CONTROLS", NULL}, 0, screen, 0);
+    if (queue_count > 0) {
+        GFX_blitButtonGroup((char*[]){"X", "REMOVE", "B", "BACK", NULL}, 1, screen, 1);
+    } else {
+        GFX_blitButtonGroup((char*[]){"B", "BACK", NULL}, 1, screen, 1);
     }
 
     // Toast notification

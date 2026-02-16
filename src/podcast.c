@@ -19,6 +19,8 @@
 #include "api.h"
 #include "wifi.h"
 #include "ui_podcast.h"
+#include "module_common.h"
+#include <sys/statvfs.h>
 
 // SDCARD_PATH is defined in platform.h via api.h
 
@@ -472,6 +474,54 @@ extern int podcast_charts_fetch(const char* country_code, PodcastChartItem* top,
                                  PodcastChartItem* new_items, int* new_count, int max_items);
 extern int podcast_charts_filter_premium(PodcastChartItem* items, int count, int max_items);
 
+// Check if image data is complete (JPEG ends with FF D9, PNG ends with IEND)
+static bool is_image_data_complete(const uint8_t* data, int size) {
+    if (size < 4) return false;
+    // JPEG: starts with FF D8, ends with FF D9
+    if (data[0] == 0xFF && data[1] == 0xD8) {
+        return (data[size - 2] == 0xFF && data[size - 1] == 0xD9);
+    }
+    // PNG: starts with 89 50 4E 47, ends with IEND chunk (AE 42 60 82)
+    if (data[0] == 0x89 && data[1] == 0x50 && data[2] == 0x4E && data[3] == 0x47) {
+        return (size >= 8 &&
+                data[size - 4] == 0xAE && data[size - 3] == 0x42 &&
+                data[size - 2] == 0x60 && data[size - 1] == 0x82);
+    }
+    return true;  // Unknown format — assume complete
+}
+
+// Validate a cached image file on disk. Returns true if valid, false if corrupt (and deletes it).
+static bool validate_cached_image(const char* path) {
+    FILE* f = fopen(path, "rb");
+    if (!f) return false;
+
+    fseek(f, 0, SEEK_END);
+    long fsize = ftell(f);
+    if (fsize < 4) { fclose(f); remove(path); return false; }
+
+    // Read just the header and tail bytes for validation
+    uint8_t header[4], tail[4];
+    fseek(f, 0, SEEK_SET);
+    fread(header, 1, 4, f);
+    fseek(f, fsize - 4, SEEK_SET);
+    fread(tail, 1, 4, f);
+    fclose(f);
+
+    // Check JPEG: FF D8 ... FF D9
+    if (header[0] == 0xFF && header[1] == 0xD8) {
+        if (tail[2] == 0xFF && tail[3] == 0xD9) return true;
+        remove(path);
+        return false;
+    }
+    // Check PNG: 89 50 4E 47 ... AE 42 60 82
+    if (header[0] == 0x89 && header[1] == 0x50 && header[2] == 0x4E && header[3] == 0x47) {
+        if (tail[0] == 0xAE && tail[1] == 0x42 && tail[2] == 0x60 && tail[3] == 0x82) return true;
+        remove(path);
+        return false;
+    }
+    return true;  // Unknown format
+}
+
 // Download artwork image to feed's data directory
 static void download_feed_artwork(PodcastFeed* feed) {
     if (!feed || !feed->artwork_url[0] || !feed->feed_id[0]) return;
@@ -482,17 +532,16 @@ static void download_feed_artwork(PodcastFeed* feed) {
     char art_path[768];
     snprintf(art_path, sizeof(art_path), "%s/artwork.jpg", feed_dir);
 
-    // Skip if already cached
-    FILE* f = fopen(art_path, "rb");
-    if (f) { fclose(f); return; }
+    // Skip if already cached and valid
+    if (validate_cached_image(art_path)) return;
 
-    // Fetch and save
+    // Fetch and save (only if image is complete)
     uint8_t* buf = (uint8_t*)malloc(1024 * 1024);
     if (!buf) return;
 
     int size = wget_fetch(feed->artwork_url, buf, 1024 * 1024);
-    if (size > 0) {
-        f = fopen(art_path, "wb");
+    if (size > 0 && is_image_data_complete(buf, size)) {
+        FILE* f = fopen(art_path, "wb");
         if (f) {
             fwrite(buf, 1, size, f);
             fclose(f);
@@ -610,6 +659,9 @@ void Podcast_cleanup(void) {
 
     // Clear UI caches
     Podcast_clearThumbnailCache();
+
+    // Allow full re-initialization on next entry (including auto-resume of downloads)
+    podcast_initialized = false;
 }
 
 const char* Podcast_getError(void) {
@@ -1448,6 +1500,10 @@ bool Podcast_isActive(void) {
     return current_feed != NULL && Player_getState() != PLAYER_STATE_STOPPED;
 }
 
+bool Podcast_isDownloading(void) {
+    return download_running;
+}
+
 // ============================================================================
 // Progress Tracking
 // ============================================================================
@@ -1509,7 +1565,11 @@ void Podcast_flushProgress(void) {
 static void sanitize_for_filename(char* str) {
     for (char* p = str; *p; p++) {
         if (*p == '/' || *p == '\\' || *p == ':' || *p == '*' ||
-            *p == '?' || *p == '"' || *p == '<' || *p == '>' || *p == '|') {
+            *p == '?' || *p == '"' || *p == '<' || *p == '>' || *p == '|' ||
+            *p == '\'' || *p == '`' || *p == '$' || *p == '!' ||
+            *p == '&' || *p == ';' || *p == '(' || *p == ')' ||
+            *p == '{' || *p == '}' || *p == '[' || *p == ']' ||
+            *p == '#' || *p == '~') {
             *p = '_';
         }
     }
@@ -1687,8 +1747,13 @@ static int Podcast_startDownloads(void) {
 }
 
 
+#define PODCAST_MAX_RETRIES 3
+
 static void* download_thread_func(void* arg) {
     (void)arg;
+
+    // Prevent device auto-sleep during downloads
+    ModuleCommon_setAutosleepDisabled(true);
 
     for (int i = 0; i < download_queue_count && !download_should_stop; i++) {
         PodcastDownloadItem* item = &download_queue[i];
@@ -1697,20 +1762,13 @@ static void* download_thread_func(void* arg) {
             continue;
         }
 
-        // Ensure WiFi is connected before each download
-        if (!Wifi_ensureConnected(NULL, 0)) {
-            LOG_error("[Podcast] No network connection, skipping download: %s\n", item->episode_title);
-            item->status = PODCAST_DOWNLOAD_FAILED;
-            download_progress.failed_count++;
-            snprintf(download_progress.error_message, sizeof(download_progress.error_message),
-                     "No network connection");
-            continue;
-        }
-
         download_progress.current_index = i;
         strncpy(download_progress.current_title, item->episode_title, PODCAST_MAX_TITLE - 1);
         item->status = PODCAST_DOWNLOAD_DOWNLOADING;
         item->progress_percent = 0;
+        item->retry_count = 0;
+        download_progress.speed_bps = 0;
+        download_progress.eta_sec = 0;
 
         // Create directory for podcast (sanitize feed title for directory name)
         char safe_feed[256];
@@ -1722,11 +1780,54 @@ static void* download_thread_func(void* arg) {
         snprintf(dir_path, sizeof(dir_path), "%s/%s", download_dir, safe_feed);
         mkdir(dir_path, 0755);
 
+        // Check disk space before downloading
+        struct statvfs fs_stat;
+        if (statvfs(download_dir, &fs_stat) == 0) {
+            unsigned long free_mb = (fs_stat.f_bavail * fs_stat.f_frsize) / (1024 * 1024);
+            if (free_mb < 50) {
+                item->status = PODCAST_DOWNLOAD_FAILED;
+                snprintf(download_progress.error_message, sizeof(download_progress.error_message),
+                         "Low disk space (%lu MB free)", free_mb);
+                download_progress.failed_count++;
+                LOG_error("[Podcast] Low disk space (%lu MB), skipping: %s\n", free_mb, item->episode_title);
+                continue;
+            }
+        }
 
-        // Use HTTP download module that writes directly to file with progress tracking
-        int bytes = wget_download_file(item->url, item->local_path,
+        // Retry loop with WiFi check and exponential backoff
+        int retries = 0;
+        int bytes = -1;
+        while (retries < PODCAST_MAX_RETRIES && !download_should_stop) {
+            // Check WiFi before each attempt
+            if (!Wifi_ensureConnected(NULL, 0)) {
+                LOG_error("[Podcast] No network connection (attempt %d/%d): %s\n",
+                          retries + 1, PODCAST_MAX_RETRIES, item->episode_title);
+                retries++;
+                item->retry_count = retries;
+                if (retries < PODCAST_MAX_RETRIES) usleep(2000000);  // 2s backoff
+                continue;
+            }
+
+            bytes = wget_download_file(item->url, item->local_path,
                                        &item->progress_percent,
-                                       &download_should_stop);
+                                       &download_should_stop,
+                                       &download_progress.speed_bps,
+                                       &download_progress.eta_sec);
+
+            if (bytes > 0 || download_should_stop) break;
+
+            retries++;
+            item->retry_count = retries;
+            LOG_error("[Podcast] Download attempt %d/%d failed: %s\n",
+                      retries, PODCAST_MAX_RETRIES, item->episode_title);
+            if (retries < PODCAST_MAX_RETRIES) {
+                usleep(2000000 * retries);  // Exponential backoff: 2s, 4s
+            }
+        }
+
+        // Reset speed/ETA between downloads
+        download_progress.speed_bps = 0;
+        download_progress.eta_sec = 0;
 
         if (download_should_stop) {
             // Remove partial file if cancelled
@@ -1741,9 +1842,12 @@ static void* download_thread_func(void* arg) {
         } else {
             item->status = PODCAST_DOWNLOAD_FAILED;
             download_progress.failed_count++;
-            // Remove partial file on failure
+            // Remove partial file after all retries exhausted
             unlink(item->local_path);
-            LOG_error("[Podcast] Failed to download: %s\n", item->url);
+            snprintf(download_progress.error_message, sizeof(download_progress.error_message),
+                     "Download failed after %d attempts", PODCAST_MAX_RETRIES);
+            LOG_error("[Podcast] Failed to download after %d retries: %s\n",
+                      PODCAST_MAX_RETRIES, item->url);
         }
     }
 
@@ -1767,6 +1871,11 @@ static void* download_thread_func(void* arg) {
     }
     download_queue_count = write_idx;
     pthread_mutex_unlock(&download_mutex);
+
+    // Re-enable auto-sleep
+    download_progress.speed_bps = 0;
+    download_progress.eta_sec = 0;
+    ModuleCommon_setAutosleepDisabled(false);
 
     download_running = false;
     podcast_state = PODCAST_STATE_IDLE;
@@ -1804,6 +1913,13 @@ void Podcast_saveDownloadQueue(void) {
     pthread_mutex_lock(&download_mutex);
     for (int i = 0; i < download_queue_count; i++) {
         PodcastDownloadItem* item = &download_queue[i];
+
+        // Don't persist completed or failed items
+        if (item->status == PODCAST_DOWNLOAD_COMPLETE ||
+            item->status == PODCAST_DOWNLOAD_FAILED) {
+            continue;
+        }
+
         JSON_Value* val = json_value_init_object();
         JSON_Object* obj = json_value_get_object(val);
 

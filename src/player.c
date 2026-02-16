@@ -2228,14 +2228,8 @@ int Player_load(const char* filepath) {
             }
         }
 
-        // If no embedded album art found, try to fetch from internet
-        if (result == 0 && player.album_art == NULL) {
-            const char* artist = player.track_info.artist[0] ? player.track_info.artist : NULL;
-            const char* title = player.track_info.title[0] ? player.track_info.title : NULL;
-            if (artist || title) {
-                album_art_fetch(artist ? artist : "", title ? title : "");
-            }
-        }
+        // Album art fetch moved to module_player.c (after Player_play)
+        // to avoid blocking playback start
     } else {
         LOG_error("Unsupported format for streaming: %s\n", filepath);
         return -1;

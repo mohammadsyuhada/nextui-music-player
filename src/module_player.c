@@ -23,6 +23,7 @@
 #include "resume.h"
 #include "playlist_m3u.h"
 #include "background.h"
+#include "album_art.h"
 
 // Music folder path
 #define MUSIC_PATH SDCARD_PATH "/Music"
@@ -55,6 +56,7 @@ static char resume_playlist_path[512] = "";
 // Resume: last save timestamp for periodic updates
 static uint32_t last_resume_save = 0;
 
+
 // Clear all player GPU overlay layers
 static void clear_gpu_layers(void) {
     GFX_clearLayers(LAYER_SCROLLTEXT);
@@ -82,6 +84,15 @@ static bool try_load_and_play(const char *path) {
     if (Player_load(path) == 0) {
         Player_play();
         const TrackInfo* info = Player_getTrackInfo();
+
+        // Fetch album art (async) and lyrics after playback starts
+        if (info && !Player_getAlbumArt()) {
+            const char* artist = info->artist[0] ? info->artist : "";
+            const char* title = info->title[0] ? info->title : "";
+            if (artist[0] || title[0]) {
+                album_art_fetch(artist, title);
+            }
+        }
         if (Settings_getLyricsEnabled() && info) {
             Lyrics_fetch(info->artist, info->title, info->duration_ms / 1000);
         }
@@ -454,6 +465,9 @@ static bool handle_playing_input(SDL_Surface *screen, PlayerInternalState *state
         clear_gpu_layers();
         *dirty = 1;
     }
+
+    // Re-render when async album art fetch completes
+    if (album_art_is_fetching()) *dirty = 1;
 
     // Animate player GPU layers (skip if screen-off hint just activated)
     if (!ModuleCommon_isScreenOffHintActive()) {

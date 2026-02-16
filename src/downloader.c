@@ -174,6 +174,11 @@ int Downloader_init(void) {
     // Load queue from file
     Downloader_loadQueue();
 
+    // Auto-resume pending downloads if queue has items and network is available
+    if (queue_count > 0 && Downloader_checkNetwork()) {
+        Downloader_downloadStart();
+    }
+
     youtube_initialized = true;
     return 0;
 }
@@ -184,10 +189,15 @@ void Downloader_cleanup(void) {
     Downloader_cancelUpdate();
     Downloader_cancelSearch();
 
-    // Ensure auto sleep is re-enabled on cleanup
+    // Wait briefly for download thread to finish
+    for (int i = 0; i < 30 && download_running; i++) {
+        usleep(100000);  // 100ms
+    }
+
+    // Re-enable auto sleep
     PWR_enableAutosleep();
 
-    // Save queue
+    // Save queue (DOWNLOADING items will become PENDING on next load)
     Downloader_saveQueue();
 }
 
@@ -466,6 +476,9 @@ int Downloader_queueAdd(const char* video_id, const char* title) {
     // Save queue to file
     Downloader_saveQueue();
 
+    // Auto-start download thread if not already running
+    Downloader_downloadStart();
+
     return 1;  // Successfully added
 }
 
@@ -563,6 +576,33 @@ bool Downloader_isDownloaded(const char* video_id) {
     return false;
 }
 
+// Parse yt-dlp speed string like "1.23MiB/s" or "500KiB/s" to bytes/sec
+static int parse_ytdlp_speed(const char* speed_str) {
+    if (!speed_str) return 0;
+    float val = 0;
+    if (sscanf(speed_str, "%f", &val) != 1) return 0;
+    if (strstr(speed_str, "GiB/s")) return (int)(val * 1024 * 1024 * 1024);
+    if (strstr(speed_str, "MiB/s")) return (int)(val * 1024 * 1024);
+    if (strstr(speed_str, "KiB/s")) return (int)(val * 1024);
+    if (strstr(speed_str, "B/s"))   return (int)val;
+    return 0;
+}
+
+// Parse yt-dlp ETA string like "00:03" or "01:23:45" to seconds
+static int parse_ytdlp_eta(const char* eta_str) {
+    if (!eta_str) return 0;
+    int h = 0, m = 0, s = 0;
+    // Try HH:MM:SS first
+    if (sscanf(eta_str, "%d:%d:%d", &h, &m, &s) == 3) {
+        return h * 3600 + m * 60 + s;
+    }
+    // Try MM:SS
+    if (sscanf(eta_str, "%d:%d", &m, &s) == 2) {
+        return m * 60 + s;
+    }
+    return 0;
+}
+
 static void* download_thread_func(void* arg) {
     (void)arg;
 
@@ -646,24 +686,45 @@ static void* download_thread_func(void* arg) {
                     }
 
                     // Parse progress from yt-dlp output
-                    // Format: [download]  XX.X% of ...
-                    char* pct = strstr(line, "%");
-                    if (pct && strstr(line, "[download]")) {
-                        // Find the start of the percentage number
-                        char* start = pct - 1;
-                        while (start > line && (isdigit(*start) || *start == '.')) {
-                            start--;
-                        }
-                        start++;
-
-                        float percent = 0;
-                        if (sscanf(start, "%f", &percent) == 1) {
-                            pthread_mutex_lock(&queue_mutex);
-                            if (download_index < queue_count) {
-                                // Download is ~80% of total, post-processing is ~20%
-                                download_queue[download_index].progress_percent = (int)(percent * 0.8f);
+                    // Format: [download]  55.3% of ~  5.21MiB at  1.23MiB/s ETA 00:03
+                    if (strstr(line, "[download]")) {
+                        char* pct = strstr(line, "%");
+                        if (pct) {
+                            // Find the start of the percentage number
+                            char* start = pct - 1;
+                            while (start > line && (isdigit(*start) || *start == '.')) {
+                                start--;
                             }
-                            pthread_mutex_unlock(&queue_mutex);
+                            start++;
+
+                            float percent = 0;
+                            if (sscanf(start, "%f", &percent) == 1) {
+                                int speed = 0;
+                                int eta = 0;
+
+                                // Parse speed: find "at" keyword then speed value
+                                char* at_ptr = strstr(line, " at ");
+                                if (at_ptr) {
+                                    speed = parse_ytdlp_speed(at_ptr + 4);
+                                }
+
+                                // Parse ETA: find "ETA" keyword
+                                char* eta_ptr = strstr(line, "ETA ");
+                                if (eta_ptr) {
+                                    eta = parse_ytdlp_eta(eta_ptr + 4);
+                                }
+
+                                pthread_mutex_lock(&queue_mutex);
+                                if (download_index < queue_count) {
+                                    // Download is ~80% of total, post-processing is ~20%
+                                    download_queue[download_index].progress_percent = (int)(percent * 0.8f);
+                                    download_queue[download_index].speed_bps = speed;
+                                    download_queue[download_index].eta_sec = eta;
+                                    download_status.speed_bps = speed;
+                                    download_status.eta_sec = eta;
+                                }
+                                pthread_mutex_unlock(&queue_mutex);
+                            }
                         }
                     }
                     // Check for post-processing progress (metadata/thumbnail embedding)
@@ -671,6 +732,10 @@ static void* download_thread_func(void* arg) {
                         pthread_mutex_lock(&queue_mutex);
                         if (download_index < queue_count) {
                             download_queue[download_index].progress_percent = 85;
+                            download_queue[download_index].speed_bps = 0;
+                            download_queue[download_index].eta_sec = 0;
+                            download_status.speed_bps = 0;
+                            download_status.eta_sec = 0;
                         }
                         pthread_mutex_unlock(&queue_mutex);
                     }
@@ -678,6 +743,8 @@ static void* download_thread_func(void* arg) {
                         pthread_mutex_lock(&queue_mutex);
                         if (download_index < queue_count) {
                             download_queue[download_index].progress_percent = 95;
+                            download_queue[download_index].speed_bps = 0;
+                            download_queue[download_index].eta_sec = 0;
                         }
                         pthread_mutex_unlock(&queue_mutex);
                     }
@@ -745,11 +812,17 @@ static void* download_thread_func(void* arg) {
             }
         }
         pthread_mutex_unlock(&queue_mutex);
+
+        // Reset speed/ETA for next item
+        download_status.speed_bps = 0;
+        download_status.eta_sec = 0;
     }
 
     // Re-enable auto sleep when downloads complete
     PWR_enableAutosleep();
 
+    download_status.speed_bps = 0;
+    download_status.eta_sec = 0;
     download_running = false;
     youtube_state = DOWNLOADER_STATE_IDLE;
 
@@ -761,31 +834,24 @@ static void* download_thread_func(void* arg) {
 
 int Downloader_downloadStart(void) {
     if (download_running) {
-        return 0;  // Already running
+        return 0;  // Already running, thread will pick up new items
     }
 
-    if (queue_count == 0) {
-        return -1;  // Nothing to download
-    }
-
-    // Reset failed items to pending (allows retry)
-    // Count pending items (including reset failed items)
+    // Count pending items
+    pthread_mutex_lock(&queue_mutex);
     int pending = 0;
     for (int i = 0; i < queue_count; i++) {
-        if (download_queue[i].status == DOWNLOADER_STATUS_FAILED) {
-            download_queue[i].status = DOWNLOADER_STATUS_PENDING;
-            download_queue[i].progress_percent = 0;
-        }
         if (download_queue[i].status == DOWNLOADER_STATUS_PENDING) {
             pending++;
         }
     }
+    pthread_mutex_unlock(&queue_mutex);
 
     if (pending == 0) {
-        return -1;  // Nothing pending
+        return -1;  // Nothing to download
     }
 
-    // Reset status
+    // Reset download status
     memset(&download_status, 0, sizeof(download_status));
     download_status.state = DOWNLOADER_STATE_DOWNLOADING;
     download_status.total_items = pending;
@@ -797,8 +863,6 @@ int Downloader_downloadStart(void) {
     if (pthread_create(&download_thread, NULL, download_thread_func, NULL) != 0) {
         download_running = false;
         youtube_state = DOWNLOADER_STATE_ERROR;
-        strncpy(error_message, "Failed to create download thread", sizeof(error_message) - 1);
-        error_message[sizeof(error_message) - 1] = '\0';
         return -1;
     }
 
@@ -811,6 +875,10 @@ void Downloader_downloadStop(void) {
         download_should_stop = true;
         // Thread is detached, just signal and return - no need to wait
     }
+}
+
+bool Downloader_isDownloading(void) {
+    return download_running;
 }
 
 const DownloaderDownloadStatus* Downloader_getDownloadStatus(void) {

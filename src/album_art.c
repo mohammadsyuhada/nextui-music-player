@@ -8,6 +8,7 @@
 #include <sys/stat.h>
 #include <dirent.h>
 #include <time.h>
+#include <pthread.h>
 
 #include "defines.h"
 #include "api.h"
@@ -26,6 +27,16 @@ typedef struct {
     char last_art_artist[256];
     char last_art_title[256];
     bool art_fetch_in_progress;
+
+    // Thread state
+    pthread_t fetch_thread;
+    bool thread_active;
+    char req_artist[256];
+    char req_title[256];
+
+    // Thread result (written by thread, read by main)
+    SDL_Surface* pending_art;
+    bool result_ready;
 } AlbumArtContext;
 
 static AlbumArtContext art_ctx = {0};
@@ -133,55 +144,12 @@ static void url_encode(const char* src, char* dst, int dst_size) {
     dst[j] = '\0';
 }
 
-void album_art_init(void) {
-    memset(&art_ctx, 0, sizeof(AlbumArtContext));
-}
+// Background thread: fetch album art from iTunes API
+static void* fetch_thread_func(void* arg) {
+    (void)arg;
+    const char* artist = art_ctx.req_artist;
+    const char* title = art_ctx.req_title;
 
-void album_art_cleanup(void) {
-    if (art_ctx.album_art) {
-        SDL_FreeSurface(art_ctx.album_art);
-        art_ctx.album_art = NULL;
-    }
-    art_ctx.last_art_artist[0] = '\0';
-    art_ctx.last_art_title[0] = '\0';
-    art_ctx.art_fetch_in_progress = false;
-}
-
-void album_art_clear(void) {
-    if (art_ctx.album_art) {
-        SDL_FreeSurface(art_ctx.album_art);
-        art_ctx.album_art = NULL;
-    }
-    art_ctx.last_art_artist[0] = '\0';
-    art_ctx.last_art_title[0] = '\0';
-}
-
-SDL_Surface* album_art_get(void) {
-    return art_ctx.album_art;
-}
-
-bool album_art_is_fetching(void) {
-    return art_ctx.art_fetch_in_progress;
-}
-
-// Fetch album art from iTunes Search API (with disk caching)
-void album_art_fetch(const char* artist, const char* title) {
-    if (!artist || !title || (artist[0] == '\0' && title[0] == '\0')) {
-        return;
-    }
-
-    // Check if we already fetched art for this track
-    if (strcmp(art_ctx.last_art_artist, artist) == 0 &&
-        strcmp(art_ctx.last_art_title, title) == 0) {
-        return;  // Already fetched
-    }
-
-    // Mark as fetching and save current track
-    art_ctx.art_fetch_in_progress = true;
-    strncpy(art_ctx.last_art_artist, artist, sizeof(art_ctx.last_art_artist) - 1);
-    strncpy(art_ctx.last_art_title, title, sizeof(art_ctx.last_art_title) - 1);
-
-    // Ensure cache directory exists
     ensure_cache_dir();
 
     // Check disk cache first
@@ -190,13 +158,9 @@ void album_art_fetch(const char* artist, const char* title) {
 
     SDL_Surface* cached_art = load_cached_album_art(cache_path);
     if (cached_art) {
-        // Free previous art
-        if (art_ctx.album_art) {
-            SDL_FreeSurface(art_ctx.album_art);
-        }
-        art_ctx.album_art = cached_art;
-        art_ctx.art_fetch_in_progress = false;
-        return;
+        art_ctx.pending_art = cached_art;
+        art_ctx.result_ready = true;
+        return NULL;
     }
 
     // Build search query using iTunes API
@@ -221,18 +185,18 @@ void album_art_fetch(const char* artist, const char* title) {
     }
 
     // Fetch iTunes API response
-    uint8_t* response_buf = (uint8_t*)malloc(32 * 1024);  // 32KB for JSON
+    uint8_t* response_buf = (uint8_t*)malloc(32 * 1024);
     if (!response_buf) {
-        art_ctx.art_fetch_in_progress = false;
-        return;
+        art_ctx.result_ready = true;
+        return NULL;
     }
 
     int bytes = wget_fetch(search_url, response_buf, 32 * 1024);
     if (bytes <= 0) {
         LOG_error("Failed to fetch iTunes search results\n");
         free(response_buf);
-        art_ctx.art_fetch_in_progress = false;
-        return;
+        art_ctx.result_ready = true;
+        return NULL;
     }
 
     response_buf[bytes] = '\0';
@@ -243,54 +207,48 @@ void album_art_fetch(const char* artist, const char* title) {
 
     if (!root) {
         LOG_error("Failed to parse iTunes JSON response\n");
-        art_ctx.art_fetch_in_progress = false;
-        return;
+        art_ctx.result_ready = true;
+        return NULL;
     }
 
     JSON_Object* obj = json_value_get_object(root);
     if (!obj) {
         json_value_free(root);
-        art_ctx.art_fetch_in_progress = false;
-        return;
+        art_ctx.result_ready = true;
+        return NULL;
     }
 
-    // Get results array
     JSON_Array* results = json_object_get_array(obj, "results");
     if (!results || json_array_get_count(results) == 0) {
         json_value_free(root);
-        art_ctx.art_fetch_in_progress = false;
-        return;
+        art_ctx.result_ready = true;
+        return NULL;
     }
 
-    // Get first result
     JSON_Object* track = json_array_get_object(results, 0);
     if (!track) {
         json_value_free(root);
-        art_ctx.art_fetch_in_progress = false;
-        return;
+        art_ctx.result_ready = true;
+        return NULL;
     }
 
-    // Get artwork URL (100x100 by default, we'll request 300x300)
     const char* artwork_url = json_object_get_string(track, "artworkUrl100");
     if (!artwork_url) {
         json_value_free(root);
-        art_ctx.art_fetch_in_progress = false;
-        return;
+        art_ctx.result_ready = true;
+        return NULL;
     }
 
     // Modify URL to get larger image and convert HTTPS to HTTP for better compatibility
     char large_artwork_url[512];
     if (strncmp(artwork_url, "https://", 8) == 0) {
-        // Convert to HTTP and remove -ssl from hostname
         const char* after_https = artwork_url + 8;
         char* ssl_pos = strstr(after_https, "-ssl.");
         if (ssl_pos) {
-            // Build HTTP URL without -ssl
             int prefix_len = ssl_pos - after_https;
             snprintf(large_artwork_url, sizeof(large_artwork_url), "http://%.*s%s",
                      prefix_len, after_https, ssl_pos + 4);
         } else {
-            // Just convert https to http
             snprintf(large_artwork_url, sizeof(large_artwork_url), "http://%s", after_https);
         }
     } else {
@@ -306,41 +264,144 @@ void album_art_fetch(const char* artist, const char* title) {
 
     json_value_free(root);
 
-    // Download the image - use larger buffer for high-res images
-    uint8_t* image_buf = (uint8_t*)malloc(1024 * 1024);  // 1MB for image
+    // Download the image
+    uint8_t* image_buf = (uint8_t*)malloc(1024 * 1024);
     if (!image_buf) {
-        art_ctx.art_fetch_in_progress = false;
-        return;
+        art_ctx.result_ready = true;
+        return NULL;
     }
 
     int image_bytes = wget_fetch(large_artwork_url, image_buf, 1024 * 1024);
     if (image_bytes <= 0) {
         LOG_error("Failed to download album art image (bytes=%d)\n", image_bytes);
         free(image_buf);
-        art_ctx.art_fetch_in_progress = false;
-        return;
+        art_ctx.result_ready = true;
+        return NULL;
     }
 
     // Load image into SDL_Surface
     SDL_RWops* rw = SDL_RWFromConstMem(image_buf, image_bytes);
     if (rw) {
-        SDL_Surface* art = IMG_Load_RW(rw, 1);  // 1 = auto-close RWops
+        SDL_Surface* art = IMG_Load_RW(rw, 1);
         if (art) {
-            // Free previous art
-            if (art_ctx.album_art) {
-                SDL_FreeSurface(art_ctx.album_art);
-            }
-            art_ctx.album_art = art;
-
             // Save to disk cache for future use
             save_album_art_to_cache(cache_path, image_buf, image_bytes);
+            art_ctx.pending_art = art;
         } else {
             LOG_error("Failed to load album art image: %s\n", IMG_GetError());
         }
     }
 
     free(image_buf);
+    art_ctx.result_ready = true;
+    return NULL;
+}
+
+void album_art_init(void) {
+    memset(&art_ctx, 0, sizeof(AlbumArtContext));
+}
+
+void album_art_cleanup(void) {
+    // Wait for any active thread to finish
+    if (art_ctx.thread_active) {
+        pthread_join(art_ctx.fetch_thread, NULL);
+        art_ctx.thread_active = false;
+    }
+    if (art_ctx.pending_art) {
+        SDL_FreeSurface(art_ctx.pending_art);
+        art_ctx.pending_art = NULL;
+    }
+    if (art_ctx.album_art) {
+        SDL_FreeSurface(art_ctx.album_art);
+        art_ctx.album_art = NULL;
+    }
+    art_ctx.last_art_artist[0] = '\0';
+    art_ctx.last_art_title[0] = '\0';
     art_ctx.art_fetch_in_progress = false;
+}
+
+void album_art_clear(void) {
+    // Wait for any active thread to finish before clearing
+    if (art_ctx.thread_active) {
+        pthread_join(art_ctx.fetch_thread, NULL);
+        art_ctx.thread_active = false;
+    }
+    if (art_ctx.pending_art) {
+        SDL_FreeSurface(art_ctx.pending_art);
+        art_ctx.pending_art = NULL;
+    }
+    if (art_ctx.album_art) {
+        SDL_FreeSurface(art_ctx.album_art);
+        art_ctx.album_art = NULL;
+    }
+    art_ctx.last_art_artist[0] = '\0';
+    art_ctx.last_art_title[0] = '\0';
+    art_ctx.art_fetch_in_progress = false;
+    art_ctx.result_ready = false;
+}
+
+SDL_Surface* album_art_get(void) {
+    // Check if background thread has delivered a result
+    if (art_ctx.result_ready && art_ctx.thread_active) {
+        pthread_join(art_ctx.fetch_thread, NULL);
+        art_ctx.thread_active = false;
+        art_ctx.art_fetch_in_progress = false;
+        art_ctx.result_ready = false;
+
+        if (art_ctx.pending_art) {
+            if (art_ctx.album_art) {
+                SDL_FreeSurface(art_ctx.album_art);
+            }
+            art_ctx.album_art = art_ctx.pending_art;
+            art_ctx.pending_art = NULL;
+        }
+    }
+    return art_ctx.album_art;
+}
+
+bool album_art_is_fetching(void) {
+    return art_ctx.art_fetch_in_progress;
+}
+
+// Fetch album art from iTunes Search API (truly async, non-blocking)
+void album_art_fetch(const char* artist, const char* title) {
+    if (!artist || !title || (artist[0] == '\0' && title[0] == '\0')) {
+        return;
+    }
+
+    // Check if we already fetched art for this track
+    if (strcmp(art_ctx.last_art_artist, artist) == 0 &&
+        strcmp(art_ctx.last_art_title, title) == 0) {
+        return;  // Already fetched
+    }
+
+    // Wait for any previous thread to finish
+    if (art_ctx.thread_active) {
+        pthread_join(art_ctx.fetch_thread, NULL);
+        art_ctx.thread_active = false;
+        // Discard any pending result from previous fetch
+        if (art_ctx.pending_art) {
+            SDL_FreeSurface(art_ctx.pending_art);
+            art_ctx.pending_art = NULL;
+        }
+    }
+
+    // Save current track info
+    art_ctx.art_fetch_in_progress = true;
+    art_ctx.result_ready = false;
+    art_ctx.pending_art = NULL;
+    strncpy(art_ctx.last_art_artist, artist, sizeof(art_ctx.last_art_artist) - 1);
+    strncpy(art_ctx.last_art_title, title, sizeof(art_ctx.last_art_title) - 1);
+    strncpy(art_ctx.req_artist, artist, sizeof(art_ctx.req_artist) - 1);
+    strncpy(art_ctx.req_title, title, sizeof(art_ctx.req_title) - 1);
+
+    // Launch background thread
+    if (pthread_create(&art_ctx.fetch_thread, NULL, fetch_thread_func, NULL) == 0) {
+        art_ctx.thread_active = true;
+    } else {
+        // Thread creation failed, fall through
+        art_ctx.art_fetch_in_progress = false;
+    }
 }
 
 // Get the total size of the album art disk cache in bytes
