@@ -102,6 +102,7 @@ typedef struct {
     char local_path[PODCAST_MAX_URL];
     PodcastDownloadStatus status;
     int progress_percent;
+    int retry_count;
 } PodcastDownloadItem;
 
 // Podcast module states
@@ -138,6 +139,8 @@ typedef struct {
     int failed_count;
     char current_title[PODCAST_MAX_TITLE];
     char error_message[256];
+    int speed_bps;
+    int eta_sec;
 } PodcastDownloadProgress;
 
 // ============================================================================
@@ -248,6 +251,9 @@ int Podcast_getDuration(void);
 
 // Check if podcast audio is active
 bool Podcast_isActive(void);
+
+// Check if podcast download thread is running
+bool Podcast_isDownloading(void);
 
 // ============================================================================
 // Progress Tracking

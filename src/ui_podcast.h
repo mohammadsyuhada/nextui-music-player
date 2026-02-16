@@ -43,6 +43,11 @@ void render_podcast_episodes(SDL_Surface* screen, int show_setting,
                               int feed_index, int selected, int* scroll,
                               const char* toast_message, uint32_t toast_time);
 
+// Render download queue view
+void render_podcast_download_queue(SDL_Surface* screen, int show_setting,
+                                    int selected, int* scroll,
+                                    const char* toast_message, uint32_t toast_time);
+
 // Render now playing screen for podcast
 void render_podcast_playing(SDL_Surface* screen, int show_setting,
                              int feed_index, int episode_index);
