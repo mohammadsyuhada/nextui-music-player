@@ -1,12 +1,13 @@
 {
   "name": "Music Player",
-  "version": "v1.7.1",
+  "version": "v1.7.2",
   "type": "TOOL",
   "description": "A comprehensive music playback application for NextUI featuring local file playback, online radio streaming, and music downloading.",
   "author": "mohammadsyuhada",
   "repo_url": "https://github.com/mohammadsyuhada/nextui-music-player",
   "release_filename": "Music.Player.pak.zip",
   "changelog": {
+    "v1.7.2": "Fixed application failed to launch on tg5050 (TSPS)",
     "v1.7.1": "Fixed a bug that caused certain podcast cannot be downloaded",
     "v1.7.0": "Background playback - music, radio, and podcasts keep playing while navigating the app",
     "v1.6.0": "Playlist support, splash screen, resume shortcut, Opus audio format, and UI improvements",

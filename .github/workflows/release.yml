@@ -29,14 +29,14 @@ jobs:
           docker run --rm \
             -v ${{ github.workspace }}/NextUI/workspace:/root/workspace \
             ghcr.io/loveretro/tg5040-toolchain:latest \
-            /bin/bash -c 'source ~/.bashrc && cd /root/workspace/tg5040/libmsettings && make build CROSS_COMPILE=aarch64-nextui-linux-gnu- PREFIX=/opt/nextui PREFIX_LOCAL=/opt/nextui && cd /root/workspace/nextui-music-player/src && make PLATFORM=tg5040'
+            /bin/bash -c 'source ~/.bashrc && cd /root/workspace/tg5040/libmsettings && make build CROSS_COMPILE=aarch64-nextui-linux-gnu- PREFIX=/opt/nextui PREFIX_LOCAL=/opt/nextui && cd /root/workspace/nextui-music-player/src && make PLATFORM=tg5040 && mkdir -p /root/workspace/_fdk-aac/include /root/workspace/_fdk-aac/lib && cp -r $PREFIX/include/fdk-aac /root/workspace/_fdk-aac/include/ && cp $PREFIX/lib/libfdk-aac.so* /root/workspace/_fdk-aac/lib/'
 
       - name: Build for tg5050
         run: |
           docker run --rm \
             -v ${{ github.workspace }}/NextUI/workspace:/root/workspace \
-            ghcr.io/loveretro/tg5040-toolchain:latest \
-            /bin/bash -c 'source ~/.bashrc && cd /root/workspace/tg5050/libmsettings && make build CROSS_COMPILE=aarch64-nextui-linux-gnu- PREFIX=/opt/nextui PREFIX_LOCAL=/opt/nextui && cd /root/workspace/nextui-music-player/src && make PLATFORM=tg5050'
+            ghcr.io/loveretro/tg5050-toolchain:latest \
+            /bin/bash -c 'source ~/.bashrc && cp -r /root/workspace/_fdk-aac/include/fdk-aac $PREFIX/include/ && cp /root/workspace/_fdk-aac/lib/libfdk-aac.so* $PREFIX/lib/ && cd /root/workspace/tg5050/libmsettings && make build CROSS_COMPILE=aarch64-nextui-linux-gnu- PREFIX=/opt/nextui PREFIX_LOCAL=/opt/nextui && cd /root/workspace/nextui-music-player/src && make PLATFORM=tg5050'
 
       - name: Package release zip
         run: |
