@@ -1,11 +1,22 @@
+## ⚠️ Repository Status Update
+
+Thanks for your support and feedback!
+
+This repository will be **archived soon** as I am no longer using NextUI. Going forward, development will focus on the built-in Music Player in Nx-Redux.
+
+### 📦 Continued Maintenance
+
+The **NextUI Music Player** will continue to be actively maintained here:  
+👉 https://github.com/nborodikhin/nextui-music-player  
+
+Pak Store will receive future updates from that repository.
+
 # NextUI Music Player
 A comprehensive music playback application for NextUI featuring local file playback, online radio streaming, podcast and music downloading.
 
 ## Supported Platforms
 - **tg5040** - TrimUI Smart Pro / TrimUI Brick / Brick Hammer
 - **tg5050** - TrimUI Smart Pro S
-
-[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/Y8Y61SI04B)
 
 ![music_player](https://github.com/user-attachments/assets/de4fe612-1c48-4e98-9537-79504e20f299)
 
